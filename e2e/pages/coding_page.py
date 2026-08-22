@@ -277,16 +277,27 @@ class CodingPage(BasePage):
             # No modal — already activated directly.
             pass
 
-        self.page.wait_for_url("**/coding", timeout=timeout)
+        # Entering via the toggle navigates to ``/coding/<sessionId>``
+        # (buildSessionPath in console/src/utils/sessionRoute.ts), so a
+        # ``**/coding`` glob never matches the session-suffixed URL. Assert
+        # the Exit toggle appears instead — a reliable signal the IDE shell
+        # mounted, and independent of whether a session id is appended.
+        expect(
+            self.page.locator(self.TOGGLE_EXIT).first
+        ).to_be_visible(timeout=timeout)
 
     def exit_coding_mode(self, timeout_ms: Optional[int] = None) -> None:
-        """Exit Coding Mode and wait until we're back on /chat."""
+        """Exit Coding Mode and wait until the Chat toggle returns."""
         timeout = timeout_ms or self.timeout
         if not self.is_in_coding_mode():
             logger.info("Not in Coding Mode; nothing to do")
             return
         self.click_exit_toggle()
-        self.page.wait_for_url("**/chat", timeout=timeout)
+        # Exiting navigates back to ``/chat/<sessionId>``; anchor on the
+        # Enter toggle reappearing rather than a ``**/chat`` glob.
+        expect(
+            self.page.locator(self.TOGGLE_ENTER).first
+        ).to_be_visible(timeout=timeout)
 
     # ========== Assertions ==========
 
@@ -313,9 +324,9 @@ class CodingPage(BasePage):
         return {"X-Agent-Id": self.AGENT_ID_DEFAULT}
 
     def api_create_project(self, api_context, name: str) -> dict:
-        """POST /api/workspace/coding-project/create."""
+        """POST /api/workspace/project-directory/create."""
         resp = api_context.post(
-            "/api/workspace/coding-project/create",
+            "/api/workspace/project-directory/create",
             data={"name": name},
             headers=self._agent_headers(),
         )
@@ -327,9 +338,9 @@ class CodingPage(BasePage):
         return body
 
     def api_activate_project(self, api_context, path: str) -> dict:
-        """PUT /api/workspace/coding-project — set the active project."""
+        """PUT /api/workspace/project-directory — set the active project."""
         resp = api_context.put(
-            "/api/workspace/coding-project",
+            "/api/workspace/project-directory",
             data={"path": path},
             headers=self._agent_headers(),
         )
@@ -351,9 +362,9 @@ class CodingPage(BasePage):
         return resp.json()
 
     def api_get_coding_project(self, api_context) -> dict:
-        """GET /api/workspace/coding-project — current bound project."""
+        """GET /api/workspace/project-directory — current bound project."""
         resp = api_context.get(
-            "/api/workspace/coding-project",
+            "/api/workspace/project-directory",
             headers=self._agent_headers(),
         )
         assert resp.ok, (

@@ -68,7 +68,16 @@ echo "PyInstaller installed"
 
 # Install project dependencies (ensures ALL runtime deps are importable)
 echo "== Installing project dependencies =="
-install_python_packages -e ".[full]"
+# Pin setuptools <82: lark-oapi still calls pkg_resources.declare_namespace
+# at import time. A *fresh* install of setuptools >= 82 removes pkg_resources
+# wholesale, so lark-oapi's except-ImportError fallback (pkgutil.extend_path)
+# kicks in and the import works. The proven failure mode is an *in-place*
+# upgrade of a legacy setuptools (seen on the macOS CI runners, and possible
+# in any environment upgrading an existing install): it can leave a
+# half-removed pkg_resources (module present, declare_namespace gone), which
+# raises an AttributeError the fallback does not catch — crashing the Feishu
+# channel. The pin keeps every environment in the known-good state.
+install_python_packages -e ".[full]" "setuptools<82"
 echo "Project dependencies installed with full extras"
 
 # Fix agent-client-protocol namespace collision
@@ -103,6 +112,7 @@ echo ""
 BACKEND_DIR="${DIST}/pyinstaller/qwenpaw-backend"
 BACKEND_EXE="${BACKEND_DIR}/qwenpaw-backend"
 CLI_EXE="${BACKEND_DIR}/qwenpaw"
+MODEL_CATALOG="${BACKEND_DIR}/_internal/qwenpaw/providers/data/model_catalog.json"
 if [ ! -d "${BACKEND_DIR}" ]; then
     echo "ERROR: Backend bundle directory not found at ${BACKEND_DIR}"
     exit 1
@@ -113,6 +123,10 @@ if [ ! -f "${BACKEND_EXE}" ]; then
 fi
 if [ ! -f "${CLI_EXE}" ]; then
     echo "ERROR: CLI executable not found at ${CLI_EXE}"
+    exit 1
+fi
+if [ ! -f "${MODEL_CATALOG}" ]; then
+    echo "ERROR: Model catalog not found at ${MODEL_CATALOG}"
     exit 1
 fi
 
@@ -129,8 +143,8 @@ BINARIES_DIR="${REPO_ROOT}/console/src-tauri/binaries"
 mkdir -p "${BINARIES_DIR}"
 
 DEST="${BINARIES_DIR}/qwenpaw-backend"
+rm -rf "${DEST}"
 mkdir -p "${DEST}"
-find "${DEST}" -mindepth 1 -exec rm -rf {} +
 cp -R "${BACKEND_DIR}/." "${DEST}/"
 chmod +x "${DEST}/qwenpaw-backend"
 chmod +x "${DEST}/qwenpaw"
@@ -142,6 +156,19 @@ echo ""
 echo "== Staging bundled Python runtime =="
 "$PYTHON_BIN" "${REPO_ROOT}/scripts/pack-tauri/stage_python_runtime.py" \
     --dest "${BINARIES_DIR}/python-runtime"
+
+# The Chrome Native Messaging host runs under this standalone interpreter,
+# outside the PyInstaller backend, so its dependencies must be installed here.
+NATIVE_HOST_PYTHON="${BINARIES_DIR}/python-runtime/python/bin/python3"
+"$NATIVE_HOST_PYTHON" -m pip install \
+    --disable-pip-version-check \
+    --no-input \
+    --no-deps \
+    --only-binary=:all: \
+    -r "${REPO_ROOT}/scripts/pack-tauri/native-host-requirements.txt"
+"$NATIVE_HOST_PYTHON" \
+    "${REPO_ROOT}/plugins/bundle/chrome/assets/scripts/nm_host.py" \
+    --check-runtime
 echo ""
 
 echo "== Staging bundled Node runtime =="
