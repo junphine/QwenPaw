@@ -22,9 +22,10 @@ const FILES_PREVIEW = "/files/preview";
 
 export const chatApi = {
   /** Upload a file for chat attachment. Returns URL path for content. */
-  uploadFile: async (file: File): Promise<ChatUploadResponse> => {
+  uploadFile: async (file: File,target_dir?: string): Promise<ChatUploadResponse> => {
     const formData = new FormData();
     formData.append("file", file);
+    formData.append("target_dir", target_dir || 'default');
     const response = await fetch(getApiUrl("/console/upload"), {
       method: "POST",
       headers: buildAuthHeaders(),

@@ -449,7 +449,7 @@ async function startBackgroundQueue(
           throw new Error(`HTTP ${res.status}`);
         }
         if (pendingRequest.projectDir) {
-          setPendingProjectDirectory(queueAgentId, queueKey, null);
+          //-setPendingProjectDirectory(queueAgentId, queueKey, null);
         }
         fetchStarted = true;
 
@@ -2723,7 +2723,7 @@ export default function ChatPage() {
       const localIdToResolve = sessionApi.lastActiveChatId ?? chatIdRef.current;
       if (response.ok && localIdToResolve) {
         if (appliedProjectDir && projectSessionId) {
-          setPendingProjectDirectory(selectedAgent, projectSessionId, null);
+          //-setPendingProjectDirectory(selectedAgent, projectSessionId, null);
         }
         sessionApi.triggerResolve(localIdToResolve);
       }
@@ -2742,6 +2742,9 @@ export default function ChatPage() {
     }) => {
       const { file, onSuccess, onError, onProgress } = options;
       try {
+        const projectSessionId = window.currentSessionId || chatIdRef.current || sessionApi.lastActiveChatId || 'new';
+        const appliedProjectDir = getPendingProjectDirectory(selectedAgent, projectSessionId);
+
         // Warn when model has no multimodal support
         if (usesQwenPawBackend && !multimodalCaps.supportsMultimodal) {
           message.warning(t("chat.attachments.multimodalWarning"));
@@ -2766,7 +2769,7 @@ export default function ChatPage() {
           return;
         }
 
-        const res = await chatApi.uploadFile(file);
+        const res = await chatApi.uploadFile(file,appliedProjectDir);
         onProgress?.({ percent: 100 });
         const previewUrl = chatApi.filePreviewUrl(res.url);
         onSuccess({ url: previewUrl });

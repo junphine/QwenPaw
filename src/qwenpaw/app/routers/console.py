@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os.path
 import re
 import time
 import uuid
@@ -16,7 +17,7 @@ from fastapi import (
     APIRouter,
     File,
     HTTPException,
-    Query,
+    Query,Form,
     Request,
     UploadFile,
 )
@@ -481,6 +482,7 @@ async def post_console_chat_stop(
 async def post_console_upload(
     request: Request,
     file: UploadFile = File(..., description="File to attach"),
+    target_dir: str|None = Form(None, description="Target dir to save"),
 ) -> dict:
     """Save to console channel media_dir."""
 
@@ -492,11 +494,20 @@ async def post_console_upload(
             detail="Channel Console not found",
         )
     media_dir = console_channel.media_dir
+    if target_dir and target_dir!='default':
+        if not target_dir.startswith('/') and target_dir.find(':',1,3)<0:
+            media_dir = workspace.workspace_dir / target_dir
+        else:
+            media_dir = Path(target_dir)
+
     media_dir.mkdir(parents=True, exist_ok=True)
     data = await file.read()
     check_upload_size(data)
     safe_name = _safe_filename(file.filename or "file")
-    stored_name = f"{uuid.uuid4().hex}_{safe_name}"
+    if not target_dir or target_dir!='default':
+        stored_name = f"{uuid.uuid4().hex}_{safe_name}"
+    else:
+        stored_name = safe_name
 
     path = (media_dir / stored_name).resolve()
     path.write_bytes(data)

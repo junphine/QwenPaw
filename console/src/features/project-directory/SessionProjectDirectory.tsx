@@ -569,7 +569,7 @@ export default function SessionProjectDirectory({
       content={panel}
       trigger="click"
       open={open}
-      onOpenChange={setOpen}
+      onOpenChange={ (o)=> {if (!chatId) setOpen(o)} }
       placement={isAgentScope ? "rightTop" : "topRight"}
     >
       <Tooltip title={info?.project_dir}>
