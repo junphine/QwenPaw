@@ -60,6 +60,20 @@ export const WALLPAPERS: Wallpaper[] = [
     background:
       "linear-gradient(135deg, #1e1b4b 0%, #831843 60%, #be185d 100%)",
   },
+  {
+    id: "tansformer",
+    labelKey: "os.wp.tansformer",
+    name: "Tansformer",
+    background:
+        "url(/wallpapers/tansformer.avif) no-repeat center / cover",
+  },
+  {
+    id: "xianjing",
+    labelKey: "os.wp.xianjing",
+    name: "仙境",
+    background:
+        "url(/wallpapers/xianjing.jpg) no-repeat center / cover",
+  },
 ];
 
 /** Default wallpaper id (matches the original desktop gradient). */

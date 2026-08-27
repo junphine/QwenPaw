@@ -29,7 +29,7 @@ interface OsIconStore {
 }
 
 const CELL_H = 104;
-const CELL_W = 96;
+const CELL_W = 96+20;
 const ORIGIN_X = 20;
 const ORIGIN_Y = MENUBAR_H + 8 + 20;
 

@@ -203,7 +203,7 @@ const useOsStylesBase = createStyles(({ css }, { p }: { p: OsPalette }) => ({
     }
   `,
   desktopIcon: css`
-    width: 84px;
+    width: 114px;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -1179,7 +1179,7 @@ const useOsStylesBase = createStyles(({ css }, { p }: { p: OsPalette }) => ({
     left: 50%;
     bottom: 10px;
     transform: translateX(-50%);
-    z-index: 50;
+    z-index: 6; /** mdoify@byron 50-> 6 */
     display: flex;
     align-items: flex-end;
     gap: 6px;

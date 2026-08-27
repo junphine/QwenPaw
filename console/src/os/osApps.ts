@@ -139,7 +139,7 @@ export const OS_APPS: OsAppDef[] = [
     fallback: "Inbox",
     Icon: Inbox,
     accent: "#eab308",
-    defaultW: 640,
+    defaultW: 840,
     defaultH: 500,
   },
   {
@@ -148,7 +148,7 @@ export const OS_APPS: OsAppDef[] = [
     fallback: "Sessions",
     Icon: History,
     accent: "#0ea5e9",
-    defaultW: 820,
+    defaultW: 1020,
     defaultH: 600,
     minW: 780,
     minH: 480,

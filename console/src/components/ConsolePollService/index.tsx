@@ -4,7 +4,7 @@ import { consoleApi, type PushMessage } from "../../api/modules/console";
 import { useApprovalContext } from "../../contexts/ApprovalContext";
 import styles from "./index.module.less";
 
-const POLL_INTERVAL_MS = 2500;
+const POLL_INTERVAL_MS = 2500*4;
 const AUTO_DISMISS_MS = 8000;
 const MAX_SEEN_IDS = 500;
 const MAX_VISIBLE_BUBBLES = 4;
