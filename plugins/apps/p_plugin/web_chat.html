@@ -1,0 +1,1971 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>P Chat - AI 群聊</title>
+<style>
+:root {
+  --bg: #EDEDED;
+  --card: #FFF;
+  --header: #2E2E2E;
+  --text: #191919;
+  --sec: #999;
+  --border: #E5E5E5;
+  --green: #07C160;
+  --blue: #667eea;
+  --my-bubble: #95EC69;
+  --other-bubble: #FFF;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);height:100vh;overflow:hidden}
+
+/* Landing */
+.landing{position:fixed;inset:0;overflow-y:auto;z-index:100;background:linear-gradient(135deg,#667eea 0%,#764ba2 50%,#f093fb 100%);transition:all 0.4s}
+.landing.hide{opacity:0;pointer-events:none;transform:scale(0.96)}
+.hero{position:relative;padding:60px 20px;text-align:center;color:#fff;min-height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center}
+.hero .icon{font-size:80px;margin-bottom:20px;animation:float 3s ease-in-out infinite}
+@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}
+.hero h1{font-size:36px;font-weight:800;margin-bottom:12px}
+.hero .tagline{font-size:16px;opacity:0.9;margin-bottom:30px;max-width:500px}
+.hero .room-card{background:rgba(255,255,255,0.15);backdrop-filter:blur(20px);border-radius:20px;padding:24px 32px;margin-bottom:30px;text-align:left;min-width:300px;border:1px solid rgba(255,255,255,0.2)}
+.hero .room-card .rn{font-size:20px;font-weight:700;margin-bottom:8px}
+.hero .room-card .rm{font-size:14px;opacity:0.9}
+.hero .room-card .rm span{background:rgba(255,255,255,0.2);padding:4px 12px;border-radius:12px;margin-right:8px;font-size:12px}
+.hero .cta{display:flex;gap:16px;justify-content:center;margin-bottom:20px}
+.hero .cta button{padding:16px 36px;border-radius:14px;font-size:17px;font-weight:600;cursor:pointer;transition:all 0.2s;border:none}
+.hero .cta .btn-primary{background:#fff;color:#667eea}
+.hero .cta .btn-secondary{background:rgba(255,255,255,0.15);color:#fff;border:1px solid rgba(255,255,255,0.3)}
+.hero .about-link{color:rgba(255,255,255,0.8);font-size:14px;text-decoration:none;border-bottom:1px solid rgba(255,255,255,0.3)}
+
+/* App */
+.app{display:none;height:100vh;flex-direction:column;background:var(--bg)}
+.app.show{display:flex}
+
+/* Header */
+.chat-header{background:var(--header);color:#fff;padding:0;height:56px;display:flex;align-items:center;box-shadow:0 2px 8px rgba(0,0,0,0.1);z-index:10}
+.chat-header .back-btn{width:44px;height:56px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:20px;transition:background 0.2s}
+.chat-header .back-btn:hover{background:rgba(255,255,255,0.1)}
+.chat-header .ht{flex:1;display:flex;align-items:center;gap:12px;padding:0 12px;min-width:0}
+.chat-header .ht .room-avatar{width:40px;height:40px;border-radius:50%;background:var(--green);display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:700;flex-shrink:0}
+.chat-header .ht .room-info{flex:1;min-width:0;overflow:hidden}
+.chat-header .ht .room-name{font-size:16px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chat-header .ht .room-meta{font-size:11px;color:#aaa}
+.chat-header .actions{display:flex;align-items:center;padding-right:8px}
+.chat-header .actions .icon-btn{width:44px;height:44px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:18px;border-radius:50%;transition:background 0.2s}
+.chat-header .actions .icon-btn:hover{background:rgba(255,255,255,0.1)}
+
+/* Modal */
+.modal{position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:200;display:none;align-items:center;justify-content:center;backdrop-filter:blur(5px)}
+.modal.show{display:flex}
+.modal-content{background:#fff;border-radius:16px;width:90%;max-width:400px;max-height:80vh;overflow:hidden;box-shadow:0 8px 30px rgba(0,0,0,0.12);animation:modalIn 0.3s ease}
+@keyframes modalIn{from{opacity:0;transform:scale(0.9)}to{opacity:1;transform:scale(1)}}
+.modal-header{padding:20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.modal-header h3{font-size:18px;font-weight:600}
+.modal-header .close-btn{width:32px;height:32px;display:flex;align-items:center;justify-content:center;cursor:pointer;border-radius:50%;transition:background 0.2s;font-size:20px}
+.modal-header .close-btn:hover{background:#f0f0f0}
+.modal-body{padding:20px}
+.modal-body .form-group{margin-bottom:16px}
+.modal-body label{display:block;font-size:14px;color:var(--sec);margin-bottom:6px}
+.modal-body input{width:100%;padding:12px 16px;border:1px solid var(--border);border-radius:12px;font-size:15px;outline:none;transition:border-color 0.2s}
+.modal-body input:focus{border-color:var(--green)}
+.modal-body .avatar-preview{width:80px;height:80px;border-radius:50%;background:var(--green);display:flex;align-items:center;justify-content:center;font-size:36px;margin:0 auto 16px;color:#fff}
+.modal-footer{padding:16px 20px;border-top:1px solid var(--border);display:flex;gap:12px;justify-content:flex-end}
+.modal-footer button{padding:12px 24px;border-radius:10px;font-size:15px;font-weight:500;cursor:pointer;transition:all 0.2s;border:none}
+.modal-footer .btn-secondary{background:#f0f0f0;color:#333}
+.modal-footer .btn-primary{background:var(--green);color:#fff}
+
+/* About */
+.about-content{text-align:center;padding:10px}
+.about-content .app-icon{font-size:64px;margin-bottom:16px}
+.about-content h2{font-size:24px;margin-bottom:8px}
+.about-content .version{color:var(--sec);font-size:14px;margin-bottom:20px}
+.about-content .features{text-align:left;background:#f8f8f8;border-radius:12px;padding:16px;margin-bottom:20px;list-style:none}
+.about-content .features li{margin-bottom:8px;font-size:14px;color:#555}
+.about-content .links{display:flex;gap:16px;justify-content:center}
+.about-content .links a{color:var(--blue);text-decoration:none;font-size:14px}
+
+/* Agents Bar */
+.agents-bar{background:var(--card);padding:10px 16px;border-bottom:1px solid var(--border);display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.agents-bar .label{font-size:12px;color:var(--sec);background:#f5f5f5;padding:4px 10px;border-radius:10px}
+.agents-bar .chip{display:flex;align-items:center;gap:6px;padding:6px 12px;border-radius:16px;font-size:13px;color:#fff;white-space:nowrap;cursor:pointer;transition:transform 0.2s}
+.agents-bar .chip:hover{transform:translateY(-1px)}
+
+/* Messages */
+.messages-container{flex:1;overflow-y:auto;padding:16px;background:#f5f5f5}
+.messages-container::-webkit-scrollbar{width:6px}
+.messages-container::-webkit-scrollbar-thumb{background:#ccc;border-radius:3px}
+
+.msg-row{display:flex;margin-bottom:16px;align-items:flex-start;animation:fadeIn 0.3s ease}
+.msg-row.mine{flex-direction:row-reverse}
+@keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+
+.msg-avatar{width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:16px;color:#fff;flex-shrink:0;box-shadow:0 2px 8px rgba(0,0,0,0.1);cursor:pointer;transition:transform 0.2s}
+.msg-avatar:hover{transform:scale(1.05)}
+.mine .msg-avatar{margin-left:12px}.msg-row:not(.mine) .msg-avatar{margin-right:12px}
+
+.msg-body{max-width:70%;min-width:120px}
+.msg-sender{font-size:12px;color:var(--sec);margin-bottom:4px;display:flex;align-items:center;gap:6px;padding:0 4px}
+.msg-sender .badge{font-size:10px;padding:2px 8px;border-radius:8px;color:#fff}
+.msg-sender .badge.ai{background:var(--blue)}
+.msg-sender .time{color:#bbb;font-size:11px;margin-left:auto}
+
+.msg-bubble{padding:12px 16px;border-radius:16px;font-size:15px;line-height:1.5;word-break:break-word;box-shadow:0 1px 2px rgba(0,0,0,0.05)}
+.mine .msg-bubble{background:var(--my-bubble);color:#000;border-bottom-right-radius:4px}
+.msg-row:not(.mine) .msg-bubble{background:var(--other-bubble);color:var(--text);border-bottom-left-radius:4px}
+.msg-bubble.system{background:transparent;color:var(--sec);text-align:center;padding:8px 0;font-size:12px;box-shadow:none}
+
+.msg-date{text-align:center;margin:20px 0;color:var(--sec);font-size:12px}
+.msg-date span{background:#e0e0e0;padding:6px 14px;border-radius:12px}
+
+/* Voice Overlay */
+.voice-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:300;display:none;align-items:center;justify-content:center;flex-direction:column;color:#fff}
+.voice-overlay.show{display:flex}
+.voice-overlay .voice-icon{font-size:80px;margin-bottom:20px;animation:pulse 1.5s infinite}
+@keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.1)}}
+.voice-overlay .voice-text{font-size:18px;margin-bottom:10px}
+.voice-overlay .voice-hint{font-size:14px;opacity:0.7}
+
+/* Input */
+.input-area{background:var(--card);padding:10px 12px;border-top:1px solid var(--border);display:flex;gap:8px;align-items:flex-end;position:relative}
+.input-area .input-actions{display:flex;gap:4px;padding-bottom:8px}
+.input-area .input-actions .action-btn{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:18px;transition:all 0.2s;color:#666}
+.input-area .input-actions .action-btn:hover{background:#f0f0f0;color:var(--green)}
+.input-area .input-actions .action-btn.voice{background:var(--green);color:#fff}
+.input-area .input-actions .action-btn.voice:hover{background:#06AD56}
+
+.input-area .input-wrapper{flex:1;position:relative}
+.input-area textarea{width:100%;padding:10px 14px;padding-right:40px;border:1px solid #e0e0e0;border-radius:20px;font-size:15px;outline:none;resize:none;max-height:120px;min-height:44px;font-family:inherit;line-height:1.4}
+.input-area textarea:focus{border-color:var(--green)}
+.input-area .send-btn{position:absolute;right:6px;bottom:6px;width:32px;height:32px;border-radius:50%;background:var(--green);color:#fff;border:none;cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;transition:all 0.2s;opacity:0.5;pointer-events:none}
+.input-area .send-btn.active{opacity:1;pointer-events:auto}
+
+/* Plus Menu */
+.plus-menu{position:absolute;bottom:70px;left:12px;background:#fff;border-radius:16px;box-shadow:0 8px 30px rgba(0,0,0,0.12);padding:12px;display:none;grid-template-columns:repeat(4,1fr);gap:12px;z-index:50}
+.plus-menu.show{display:grid;animation:slideUp 0.2s ease}
+@keyframes slideUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+.plus-menu .menu-item{display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 8px;border-radius:12px;cursor:pointer;transition:background 0.2s}
+.plus-menu .menu-item:hover{background:#f5f5f5}
+.plus-menu .menu-item .icon{width:48px;height:48px;border-radius:50%;background:#f5f5f5;display:flex;align-items:center;justify-content:center;font-size:24px}
+.plus-menu .menu-item .label{font-size:12px;color:#666}
+
+/* Toast */
+.toast{position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#333;color:#fff;padding:12px 28px;border-radius:24px;font-size:14px;z-index:9999;animation:toastIn 0.3s ease}
+@keyframes toastIn{from{opacity:0;transform:translateX(-50%) translateY(-20px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
+
+/* Empty State */
+.empty-state{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--sec);padding:40px}
+.empty-state .icon{font-size:72px;margin-bottom:16px;opacity:0.4}
+.empty-state .title{font-size:18px;margin-bottom:8px;color:#666}
+
+/* Responsive */
+@media (max-width:480px){
+  .hero h1{font-size:28px}
+  .msg-body{max-width:75%}
+}
+
+/* Voice Recording */
+.voice-overlay{position:fixed;bottom:120px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.85);color:#fff;padding:20px 40px;border-radius:20px;z-index:200;display:none;text-align:center;min-width:200px}
+.voice-overlay.show{display:block}
+.voice-overlay .voice-wave{font-size:40px;margin-bottom:8px;animation:float 2s ease-in-out infinite}
+.voice-overlay .voice-time{font-size:18px;font-weight:600;margin-bottom:6px;font-family:monospace}
+.voice-overlay .voice-hint{font-size:12px;opacity:0.7;padding:4px 12px;border-radius:12px;background:rgba(255,0,0,0.2);display:inline-block}
+
+/* Image Preview Modal */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:300;display:none;align-items:center;justify-content:center}
+.modal-overlay.show{display:flex}
+.image-preview-box{position:relative;max-width:95vw;max-height:95vh}
+.image-preview-box img{max-width:95vw;max-height:90vh;border-radius:8px;object-fit:contain}
+.image-preview-close{position:absolute;top:-36px;right:0;color:#fff;font-size:28px;cursor:pointer;width:32px;height:32px;text-align:center;line-height:32px}
+
+/* Upload Progress */
+.upload-progress-box{background:#fff;border-radius:16px;padding:30px 40px;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,0.3)}
+.spinner{width:40px;height:40px;border:4px solid #e0e0e0;border-top-color:#667eea;border-radius:50%;animation:spin 0.8s linear infinite;margin:0 auto 16px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.upload-text{font-size:15px;color:#666;font-weight:500}
+
+/* Camera / Video Recorder */
+.camera-modal{position:fixed;inset:0;z-index:400;background:#000;display:none;flex-direction:column}
+.camera-modal.show{display:flex}
+.camera-modal .cam-header{display:flex;align-items:center;padding:12px 16px;color:#fff;gap:12px}
+.camera-modal .cam-header .cam-close{font-size:24px;cursor:pointer}
+.camera-modal .cam-header .cam-title{font-size:16px;font-weight:600}
+.camera-modal .cam-view{flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.camera-modal .cam-view video{max-width:100%;max-height:100%;object-fit:contain}
+.camera-modal .cam-footer{display:flex;align-items:center;justify-content:center;padding:24px;gap:40px}
+.camera-modal .cam-footer .cam-btn{width:64px;height:64px;border-radius:50%;border:4px solid #fff;background:rgba(255,255,255,0.3);cursor:pointer;transition:all 0.15s}
+.camera-modal .cam-footer .cam-btn:active{transform:scale(0.9);background:#fff}
+.camera-modal .cam-footer .cam-switch{width:44px;height:44px;border-radius:50%;background:rgba(255,255,255,0.2);color:#fff;border:none;cursor:pointer;font-size:20px;display:flex;align-items:center;justify-content:center}
+.camera-modal .cam-footer .cam-done{background:#07C160;color:#fff;border:none;padding:10px 20px;border-radius:20px;font-size:14px;font-weight:600;cursor:pointer;display:none}
+.camera-modal .cam-footer .cam-done.show{display:block}
+.camera-modal .cam-footer .rec-timer{color:#fff;font-size:14px;font-family:monospace}
+.camera-modal .cam-preview{display:none;position:absolute;inset:0}
+.camera-modal .cam-preview img{width:100%;height:100%;object-fit:contain}
+.rec-dot{display:inline-block;width:12px;height:12px;background:red;border-radius:50%;animation:blink 0.8s infinite}
+@keyframes blink{50%{opacity:0.3}}
+
+/* @Mention Dropdown */
+.mention-dropdown{position:fixed;background:#fff;border-radius:12px;box-shadow:0 -2px 12px rgba(0,0,0,0.15);max-height:180px;overflow-y:auto;z-index:250;display:none}
+.mention-dropdown.show{display:block}
+.mention-dropdown .mention-item{padding:12px 16px;display:flex;align-items:center;gap:10px;cursor:pointer;border-bottom:1px solid #f0f0f0;transition:background 0.15s}
+.mention-dropdown .mention-item:hover{background:#f5f5f5}
+.mention-dropdown .mention-item .mi-avatar{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font-size:16px;font-weight:600;flex-shrink:0}
+.mention-dropdown .mention-item .mi-name{font-size:14px;font-weight:500}
+.mention-dropdown .mention-item .mi-id{font-size:11px;color:#999}
+
+/* Reply Bar */
+.reply-bar{background:#f5f5f5;padding:10px 16px;display:none;align-items:center;border-top:1px solid var(--border)}
+.reply-bar.show{display:flex}
+.reply-bar .reply-preview{flex:1;font-size:13px;color:#666;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border-left:3px solid var(--green);padding-left:10px}
+.reply-bar .reply-preview .rp-user{color:var(--green);font-weight:600}
+.reply-bar .reply-close{font-size:18px;color:#999;cursor:pointer;padding:4px}
+
+/* Context Menu (Long Press) */
+.ctx-menu{position:fixed;background:#fff;border-radius:12px;box-shadow:0 4px 24px rgba(0,0,0,0.18);z-index:250;min-width:140px;display:none;overflow:hidden}
+.ctx-menu.show{display:block}
+.ctx-menu .ctx-item{padding:13px 20px;font-size:14px;cursor:pointer;display:flex;align-items:center;gap:8px;transition:background 0.1s}
+.ctx-menu .ctx-item:hover{background:#f5f5f5}
+.ctx-menu .ctx-item.danger{color:#e53e3e}
+
+/* Search Panel */
+.search-panel{position:fixed;top:0;left:0;right:0;background:#fff;z-index:150;padding:10px 16px;box-shadow:0 2px 8px rgba(0,0,0,0.1);display:none;flex-direction:column;max-height:60vh}
+.search-panel.show{display:flex}
+.search-panel .sp-header{display:flex;align-items:center;gap:10px}
+.search-panel .sp-input{flex:1;padding:10px 14px;border:1px solid var(--border);border-radius:8px;font-size:14px;outline:none}
+.search-panel .sp-cancel{color:var(--green);font-size:14px;cursor:pointer;white-space:nowrap}
+.search-panel .sp-results{flex:1;overflow-y:auto;margin-top:8px}
+.search-panel .sp-result{padding:10px 0;border-bottom:1px solid #f0f0f0;cursor:pointer}
+.search-panel .sp-result .sr-time{font-size:11px;color:#999;margin-bottom:4px}
+.search-panel .sp-result .sr-content{font-size:13px;color:#333}
+.search-panel .sp-empty{text-align:center;padding:40px;color:#999}
+.search-panel .sp-count{font-size:12px;color:#999;padding:8px 0}
+
+/* Location Message */
+.loc-card{background:#fff;border-radius:10px;overflow:hidden;max-width:220px;cursor:pointer}
+.loc-card .loc-img{width:100%;height:100px;background:linear-gradient(135deg,#667eea,#764ba2);display:flex;align-items:center;justify-content:center;font-size:32px;color:#fff}
+.loc-card .loc-info{padding:8px 10px}
+.loc-card .loc-name{font-size:13px;font-weight:500;color:#333}
+.loc-card .loc-addr{font-size:11px;color:#999;margin-top:2px}
+
+/* Pull-down loading */
+.load-more{text-align:center;padding:12px;color:#999;font-size:12px;cursor:pointer}
+.load-more:hover{color:#07C160}
+
+/* Message recalled */
+.msg-recalled{color:#999;font-style:italic;font-size:12px;padding:4px 10px}
+
+/* Reply reference in bubble */
+.reply-ref{background:rgba(0,0,0,0.04);padding:8px 10px;border-radius:6px;margin-bottom:6px;font-size:12px;color:#666;border-left:3px solid var(--green);cursor:pointer}
+.reply-ref .rr-user{color:var(--green);font-weight:600}
+
+/* ── Panel Tab Bar (Tailchat-style, inspired by Give U Face) ── */
+.panel-tabs{display:flex;overflow-x:auto;background:var(--card);border-bottom:1px solid var(--border);scrollbar-width:none;flex-shrink:0}
+.panel-tabs::-webkit-scrollbar{display:none}
+.panel-tab{display:flex;align-items:center;gap:6px;padding:10px 16px;font-size:13px;color:#888;white-space:nowrap;cursor:pointer;border-bottom:2px solid transparent;transition:all 0.2s;flex-shrink:0;position:relative}
+.panel-tab:hover{color:#333;background:#f8f8f8}
+.panel-tab.active{color:var(--green);border-bottom-color:var(--green);font-weight:600}
+.panel-tab .tab-icon{font-size:16px}
+.panel-tab .tab-close{font-size:12px;color:#ccc;margin-left:4px;display:none}
+.panel-tab:hover .tab-close{display:inline}
+.panel-tab-add{padding:10px 14px;font-size:18px;color:#999;cursor:pointer;flex-shrink:0;display:flex;align-items:center;transition:all 0.2s}
+.panel-tab-add:hover{color:var(--green);background:#f8f8f8}
+
+/* ── Panel Content ── */
+.panel-content{flex:1;overflow:hidden;display:flex;flex-direction:column;position:relative}
+.panel-content .panel-view{flex:1;display:none;overflow:hidden}
+.panel-content .panel-view.active{display:flex;flex-direction:column}
+.panel-content iframe.panel-webview{width:100%;height:100%;border:none;flex:1}
+
+/* ── Discover Panel (inspired by Give U Face F2SP + Network Code) ── */
+.discover-panel{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:16px}
+.discover-card{background:var(--card);border-radius:14px;padding:18px;box-shadow:0 1px 3px rgba(0,0,0,0.04)}
+.discover-card h3{margin:0 0 12px;font-size:15px;color:#333}
+.discover-card .dc-input-group{display:flex;gap:8px;margin-bottom:8px}
+.discover-card .dc-input-group input{flex:1;padding:10px 14px;border:1px solid var(--border);border-radius:10px;font-size:14px;outline:none}
+.discover-card .dc-input-group input:focus{border-color:var(--green)}
+.discover-card .dc-input-group button{padding:10px 18px;background:var(--green);color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:500;cursor:pointer;white-space:nowrap}
+.discover-card .dc-sub{font-size:12px;color:#999;margin-top:6px}
+.discover-card .dc-result{padding:10px 0;border-top:1px solid #f0f0f0;margin-top:8px}
+.discover-card .dc-result .dc-name{font-size:14px;font-weight:600;margin-bottom:4px}
+.discover-card .dc-result .dc-code{font-size:12px;color:var(--sec);font-family:monospace}
+.discover-card .dc-result .dc-btn{padding:6px 14px;border-radius:8px;font-size:12px;cursor:pointer;border:none;margin-top:6px}
+.discover-card .dc-btn.connect{background:var(--blue);color:#fff}
+.discover-card .dc-btn.connected{background:#e0e0e0;color:#666;cursor:default}
+.discover-card .dc-services{list-style:none;padding:0;margin:0}
+.discover-card .dc-services li{display:flex;align-items:center;gap:10px;padding:12px 0;border-bottom:1px solid #f0f0f0}
+.discover-card .dc-services li:last-child{border-bottom:none}
+.discover-card .dc-services .svc-icon{width:40px;height:40px;border-radius:50%;background:#f5f5f5;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0}
+.discover-card .dc-services .svc-info{flex:1;min-width:0}
+.discover-card .dc-services .svc-name{font-size:14px;font-weight:500;color:#333}
+.discover-card .dc-services .svc-code{font-size:11px;color:#999;font-family:monospace}
+
+/* ── My Network Codes ── */
+.my-codes-list{display:flex;flex-direction:column;gap:8px}
+.my-code-item{display:flex;align-items:center;gap:10px;padding:12px;background:#f9f9f9;border-radius:10px}
+.my-code-item .mc-icon{font-size:24px;flex-shrink:0}
+.my-code-item .mc-info{flex:1;min-width:0}
+.my-code-item .mc-info .mc-code{font-size:14px;font-weight:600;font-family:monospace;color:#333}
+.my-code-item .mc-info .mc-meta{font-size:11px;color:#999;margin-top:2px}
+.my-code-item .mc-actions{display:flex;gap:4px}
+.my-code-item .mc-actions button{padding:4px 10px;border-radius:6px;font-size:11px;cursor:pointer;border:none}
+.my-code-item .mc-actions .btn-share{background:var(--green);color:#fff}
+.my-code-item .mc-actions .btn-revoke{background:#ff4757;color:#fff}
+</style>
+</head>
+<body>
+
+<!-- Landing -->
+<div class="landing" id="landing">
+  <div class="hero">
+    <div class="icon">🤖</div>
+    <h1 id="heroRoomName">P Chat</h1>
+    <div class="tagline">AI 群聊 · 多人多智能体实时协作<br>按住说话 · 文件分享 · 视频通话</div>
+    <div class="room-card">
+      <div class="rn" id="heroRoomTitle">加载中...</div>
+      <div class="rm">
+        <span id="heroAgentCount">0 个智能体</span>
+        <span id="heroRoomType">公开</span>
+      </div>
+    </div>
+    <div class="cta">
+      <button class="btn-primary" onclick="openProfileModal()">🚀 加入群聊</button>
+      <button class="btn-secondary" onclick="copyLink()">🔗 分享</button>
+    </div>
+    <a href="#" class="about-link" onclick="openAboutModal();return false">关于 P Chat</a>
+  </div>
+</div>
+
+<!-- Profile Modal -->
+<div class="modal" id="profileModal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h3>👤 设置个人信息</h3>
+      <div class="close-btn" onclick="closeProfileModal()">×</div>
+    </div>
+    <div class="modal-body">
+      <div class="avatar-preview" id="profileAvatar">👤</div>
+      <div class="form-group">
+        <label>昵称</label>
+        <input type="text" id="nicknameInput" placeholder="输入你的昵称" maxlength="20">
+      </div>
+      <div class="form-group">
+        <label>用户ID</label>
+        <input type="text" id="userIdInput" readonly style="background:#f5f5f5;color:#999">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" onclick="closeProfileModal()">取消</button>
+      <button class="btn-primary" onclick="joinChat()">加入群聊</button>
+    </div>
+  </div>
+</div>
+
+<!-- About Modal -->
+<div class="modal" id="aboutModal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h3>ℹ️ 关于</h3>
+      <div class="close-btn" onclick="closeAboutModal()">×</div>
+    </div>
+    <div class="modal-body">
+      <div class="about-content">
+        <div class="app-icon">🤖</div>
+        <h2>P Chat</h2>
+        <div class="version">版本 3.8.1 · AI 群聊</div>
+        <ul class="features">
+          <li>💬 多人多智能体实时群聊</li>
+          <li>🤖 支持多个 AI 智能体协作</li>
+          <li>🎙️ 按住说话（语音输入）</li>
+          <li>📎 文件分享与下载</li>
+          <li>📷 相册、拍照、视频通话</li>
+          <li>🔗 一键分享邀请链接</li>
+        </ul>
+        <div class="links">
+          <a href="#" onclick="closeAboutModal();return false">关闭</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Room Settings Modal -->
+<div class="modal" id="roomSettingsModal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h3>⚙️ 群聊设置</h3>
+      <div class="close-btn" onclick="closeRoomSettingsModal()">×</div>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label>群聊名称</label>
+        <input type="text" id="roomNameInput" placeholder="输入新名称" maxlength="30" style="width:100%;padding:12px 16px;border:1.5px solid #e0e0e0;border-radius:10px;font-size:15px;outline:none;transition:border .2s;box-sizing:border-box">
+      </div>
+      <div id="roomSettingsInfo" style="font-size:12px;color:#999;margin-bottom:12px"></div>
+      <div class="form-group">
+        <label>房间类型</label>
+        <select id="roomTypeSelect" style="width:100%;padding:10px 12px;border:1px solid #e0e0e0;border-radius:10px;font-size:14px;outline:none">
+          <option value="public">公开群聊</option>
+          <option value="private">私密群聊</option>
+          <option value="official">官方聊天室</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <button class="btn-secondary" onclick="closeRoomSettingsModal()" style="width:48%">取消</button>
+        <button class="btn-primary" onclick="saveRoomSettings()" style="width:48%">💾 保存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Chat App -->
+<div class="app" id="app">
+  <div class="chat-header">
+    <div class="back-btn" onclick="showLanding()">←</div>
+    <div class="ht">
+      <div class="room-avatar" id="roomAvatar">P</div>
+      <div class="room-info">
+        <div class="room-name" id="chatTitle">P Chat</div>
+        <div class="room-meta" id="chatMeta"></div>
+      </div>
+    </div>
+    <div class="actions">
+      <div class="icon-btn" onclick="openSearch()">🔍</div>
+      <div class="icon-btn" onclick="openRoomSettingsModal()">⚙️</div>
+      <div class="icon-btn" onclick="openProfileModal()">👤</div>
+      <div class="icon-btn" onclick="openAboutModal()">ℹ️</div>
+    </div>
+  </div>
+  
+  <!-- ── 公告栏 (Announcement Bar) ── -->
+  <div id="announcementBar" style="display:none;background:#fffbe6;border-bottom:1px solid #ffe58f;padding:8px 16px;align-items:flex-start;gap:8px">
+    <span style="font-size:16px;flex-shrink:0;margin-top:2px">📌</span>
+    <div id="announcementContent" style="flex:1;font-size:13px;color:#8c6900;line-height:1.6;white-space:pre-wrap;max-height:120px;overflow:auto"></div>
+    <div id="announcementClose" style="font-size:16px;cursor:pointer;flex-shrink:0;padding:0 4px" onclick="closeAnnouncement()">✕</div>
+  </div>
+  
+  <!-- ── 一键安装游戏智能体 ── -->
+  <div id="gameAgentInstallBar" style="display:none;background:#e6f7ff;border-bottom:1px solid #91d5ff;padding:12px 16px;align-items:center;gap:12px">
+    <span style="font-size:28px">🎮</span>
+    <div style="flex:1">
+      <div style="font-size:14px;font-weight:600;color:#0050b3">安装游戏智能体</div>
+      <div style="font-size:12px;color:#333">此房间还没有智能体。一键安装 AI 角色，开始互动游戏！</div>
+    </div>
+    <button id="installGameAgentsBtn" onclick="installGameAgents()" style="background:#FF6B6B;color:#fff;border:none;padding:8px 16px;border-radius:6px;font-size:13px;font-weight:500;cursor:pointer;white-space:nowrap">🚀 一键安装</button>
+  </div>
+  
+  <div class="agents-bar" id="agentsBar"><span class="label">🤖 智能体</span></div>
+  
+  <!-- ── Panel Tab Bar (Tailchat-style, inspired by Give U Face) ── -->
+  <div class="panel-tabs" id="panelTabs">
+    <div class="panel-tab active" data-panel="chat" id="tabChat">💬 聊天</div>
+  </div>
+  
+  <!-- ── Panel Content Area ── -->
+  <div class="panel-content" id="panelContent">
+    <!-- Chat Panel (default) -->
+    <div class="panel-view active" id="panelChat">
+      <div class="messages-container" id="messages">
+        <div class="load-more" onclick="loadMoreHistory()">↑ 点击加载更早的消息</div>
+        <div class="empty-state">
+          <div class="icon">💬</div>
+          <div class="title">开始聊天</div>
+          <div class="desc">发送第一条消息，与 AI 智能体开始群聊</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <div class="voice-overlay" id="voiceOverlay">
+    <div class="voice-wave" id="voiceWave">🎙️</div>
+    <div class="voice-time" id="voiceTime">00:00</div>
+    <div class="voice-hint" id="cancelHint">↑ 上滑取消发送</div>
+  </div>
+  
+  <div class="plus-menu" id="plusMenu">
+    <div class="menu-item" onclick="selectFile()">
+      <div class="icon">📎</div>
+      <div class="label">文件</div>
+    </div>
+    <div class="menu-item" onclick="selectImage()">
+      <div class="icon">🖼️</div>
+      <div class="label">相册</div>
+    </div>
+    <div class="menu-item" onclick="takePhoto()">
+      <div class="icon">📷</div>
+      <div class="label">拍照</div>
+    </div>
+    <div class="menu-item" onclick="videoCall()">
+      <div class="icon">📹</div>
+      <div class="label">视频</div>
+    </div>
+    <div class="menu-item" onclick="shareLocation()">
+      <div class="icon">📍</div>
+      <div class="label">位置</div>
+    </div>
+  </div>
+  
+  <div class="input-area">
+    <div class="input-actions">
+      <div class="action-btn" onclick="togglePlusMenu()">+</div>
+      <div class="action-btn voice" id="voiceBtn" onmousedown="startVoiceRecording(event)" ontouchstart="startVoiceRecording(event);touchStartY=event.touches[0].clientY" onmouseup="stopVoiceRecording(event)" ontouchend="stopVoiceRecording(event)" ontouchmove="onVoiceMove(event)">🎙️</div>
+    </div>
+    <div class="input-wrapper">
+      <textarea id="messageInput" placeholder="输入消息..." rows="1" onkeydown="onKey(event)" oninput="onInput()"></textarea>
+      <button class="send-btn" id="sendBtn" onclick="sendMessage()">➤</button>
+    </div>
+  </div>
+</div>
+
+<input type="file" id="fileInput" style="display:none" onchange="onFileSelected(event)">
+<input type="file" id="imageInput" style="display:none" accept="image/*" onchange="onImageSelected(event)">
+
+<!-- Image Preview Modal -->
+<div class="modal-overlay" id="imagePreviewModal" onclick="closeImagePreview()">
+  <div class="image-preview-box" onclick="event.stopPropagation()">
+    <div class="image-preview-close" onclick="closeImagePreview()">✕</div>
+    <img id="previewImage" src="" alt="Preview">
+  </div>
+</div>
+
+<!-- Upload Progress -->
+<div class="modal-overlay" id="uploadProgress">
+  <div class="upload-progress-box" onclick="event.stopPropagation()">
+    <div class="spinner"></div>
+    <div class="upload-text">正在上传...</div>
+  </div>
+</div>
+
+<!-- Camera / Video Modal -->
+<div class="camera-modal" id="cameraModal">
+  <div class="cam-header">
+    <div class="cam-close" onclick="closeCamera()">✕</div>
+    <div class="cam-title" id="camTitle">📷 拍照</div>
+    <div class="rec-timer" id="recTimer" style="display:none"><span class="rec-dot"></span> 00:00</div>
+  </div>
+  <div class="cam-view">
+    <video id="camVideo" autoplay playsinline></video>
+    <div class="cam-preview" id="camPreview"><img id="camPreviewImg" src=""></div>
+  </div>
+  <div class="cam-footer">
+    <button class="cam-switch" id="camSwitch" onclick="switchCamera()" style="display:none">🔄</button>
+    <button class="cam-btn" id="camCapture" onclick="capturePhoto()"></button>
+    <button class="cam-done" id="camDone" onclick="sendCaptured()">✅ 发送</button>
+    <button class="cam-done" id="camRetake" onclick="retakePhoto()" style="background:#999">🔄 重拍</button>
+  </div>
+</div>
+
+<!-- @Mention Dropdown -->
+<div class="mention-dropdown" id="mentionDropdown"></div>
+
+<!-- Reply Bar -->
+<div class="reply-bar" id="replyBar">
+  <div class="reply-preview" id="replyPreview" onclick="scrollToMessage(replyToId)"></div>
+  <div class="reply-close" onclick="cancelReply()">✕</div>
+</div>
+
+<!-- Context Menu (Long Press) -->
+<div class="ctx-menu" id="ctxMenu">
+  <div class="ctx-item" onclick="ctxCopy()">📋 复制</div>
+  <div class="ctx-item" onclick="ctxReply()">↩️ 引用</div>
+  <div class="ctx-item danger" onclick="ctxRecall()">🗑️ 撤回</div>
+</div>
+
+<!-- Search Panel -->
+<div class="search-panel" id="searchPanel">
+  <div class="sp-header">
+    <input class="sp-input" id="spInput" placeholder="🔍 搜索聊天记录..." oninput="doSearch()">
+    <div class="sp-cancel" onclick="closeSearch()">取消</div>
+  </div>
+  <div class="sp-count" id="spCount"></div>
+  <div class="sp-results" id="spResults"></div>
+</div>
+
+<!-- ── Add Panel Modal (Tailchat-style, inspired by Give U Face) ── -->
+<div class="modal" id="addPanelModal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h3>📌 添加面板</h3>
+      <div class="close-btn" onclick="closeAddPanel()">×</div>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label>面板名称</label>
+        <input type="text" id="panelNameInput" placeholder="如：🌐 发现、📰 资讯" maxlength="30">
+      </div>
+      <div class="form-group">
+        <label>面板类型</label>
+        <select id="panelTypeSelect" style="width:100%;padding:10px 12px;border:1px solid #e0e0e0;border-radius:10px;font-size:14px;outline:none">
+          <option value="webview">🌐 网页 (WebView)</option>
+          <option value="chat">💬 聊天</option>
+        </select>
+      </div>
+      <div class="form-group" id="panelUrlGroup">
+        <label>网址 URL</label>
+        <input type="text" id="panelUrlInput" placeholder="如：agent.bh-jk.com 或 https://..." maxlength="500">
+        <div style="font-size:11px;color:#999;margin-top:4px">输入网站地址，将在一个内嵌浏览器中打开</div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" onclick="closeAddPanel()">取消</button>
+      <button class="btn-primary" onclick="addPanel()">添加</button>
+    </div>
+  </div>
+</div>
+
+<script>
+var API_BASE = location.origin + '/api/plugins/p_plugin';
+var WS_BASE = API_BASE.replace(/^http/, 'ws');
+var roomId = location.pathname.match(/\/web\/(\w+)/)?.[1] || 'default';
+var params = new URLSearchParams(location.search);
+
+var userId = params.get('user_id') || localStorage.getItem('p_web_uid') || 'u_' + Math.random().toString(36).substr(2, 9);
+var nickname = params.get('nickname') || localStorage.getItem('p_web_nickname') || '';
+
+var messages = [], agents = [], roomName = 'P Chat', roomType = 'public', ws = null;
+var panels = [], activePanelId = 'chat';
+var isRecording = false, isCancelled = false, audioChunks = [], mediaRecorder = null;
+var recordingStartTime = 0, recordingTimer = null, touchStartY = 0;
+
+localStorage.setItem('p_web_uid', userId);
+
+// Init
+if (roomId) {
+  fetch(API_BASE + '/rooms/' + roomId).then(r => r.json()).then(d => {
+    roomName = d.name || roomId;
+    roomType = d.type || 'public';
+    agents = d.agents || [];
+    panels = d.panels || [];
+    roomName = roomName; // preserve
+    document.getElementById('heroRoomTitle').textContent = roomName;
+    document.getElementById('heroRoomName').textContent = roomName;
+    document.getElementById('heroAgentCount').textContent = agents.length + ' 个智能体';
+    document.getElementById('heroRoomType').textContent = roomType === 'official' ? '官方' : '公开';
+    document.getElementById('roomAvatar').textContent = roomName.charAt(0);
+  });
+}
+
+// Modals
+function openProfileModal() {
+  document.getElementById('nicknameInput').value = nickname;
+  document.getElementById('userIdInput').value = userId;
+  document.getElementById('profileModal').classList.add('show');
+}
+function closeProfileModal() { document.getElementById('profileModal').classList.remove('show'); }
+function openAboutModal() { document.getElementById('aboutModal').classList.add('show'); }
+function closeAboutModal() { document.getElementById('aboutModal').classList.remove('show'); }
+
+function openRoomSettingsModal() {
+  var modal = document.getElementById('roomSettingsModal');
+  if (!modal) return;
+  var room = _rooms.find ? _rooms.find(function(r) { return r.id === roomId; }) : null;
+  var nameInput = document.getElementById('roomNameInput');
+  var typeSelect = document.getElementById('roomTypeSelect');
+  var infoEl = document.getElementById('roomSettingsInfo');
+  if (nameInput) nameInput.value = '';
+  if (typeSelect) typeSelect.value = 'public';
+  if (infoEl) infoEl.textContent = '';
+  if (room) {
+    if (nameInput) nameInput.value = room.name || '';
+    if (typeSelect) typeSelect.value = room.type || 'public';
+    if (infoEl) infoEl.textContent = '房间 ID: ' + room.id + ' · 创建者: ' + (room.creator_nickname || room.creator_id || '未知');
+  }
+  modal.classList.add('show');
+}
+
+function closeRoomSettingsModal() {
+  document.getElementById('roomSettingsModal').classList.remove('show');
+}
+
+function saveRoomSettings() {
+  var newName = (document.getElementById('roomNameInput') || {}).value || '';
+  var newType = (document.getElementById('roomTypeSelect') || {}).value || 'public';
+  if (!newName.trim()) { toast('❌ 请输入群聊名称'); return; }
+  
+  fetch(API_BASE + '/rooms/' + roomId, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user_id: userId, name: newName.trim(), type: newType })
+  }).then(function(r) { return r.json(); }).then(function(d) {
+    if (d.success) {
+      toast('✅ 群聊设置已更新');
+      closeRoomSettingsModal();
+      // Update UI
+      roomName = newName.trim();
+      roomType = newType;
+      var titleEl = document.getElementById('chatTitle');
+      var avatarEl = document.getElementById('roomAvatar');
+      if (titleEl) titleEl.textContent = roomName;
+      if (avatarEl) avatarEl.textContent = roomName.charAt(0);
+      var metaEl = document.getElementById('chatMeta');
+      if (metaEl) metaEl.textContent = agents.length + ' 个智能体 · ' + (roomType === 'official' ? '官方' : '公开');
+    } else {
+      toast('❌ ' + (d.detail || d.error || '更新失败'));
+    }
+  }).catch(function() { toast('❌ 网络错误'); });
+}
+
+// Join
+function joinChat() {
+  var n = document.getElementById('nicknameInput').value.trim();
+  if (!n) { toast('请输入昵称'); return; }
+  nickname = n;
+  localStorage.setItem('p_web_nickname', nickname);
+  closeProfileModal();
+  enterChat();
+}
+
+function enterChat() {
+  document.getElementById('landing').classList.add('hide');
+  document.getElementById('app').classList.add('show');
+  document.getElementById('chatTitle').textContent = roomName;
+  document.getElementById('chatMeta').textContent = agents.length + ' 个智能体 · ' + (roomType === 'official' ? '官方' : '公开');
+  renderAgentsBar();
+  loadMessages();
+  connectWS();
+  // Load panels (panel system v5.0.0)
+  loadPanels();
+  // Load announcement
+  loadAnnouncement();
+  // Check game agents status
+  checkGameAgentsStatus();
+}
+
+function showLanding() {
+  document.getElementById('landing').classList.remove('hide');
+  document.getElementById('app').classList.remove('show');
+  if (ws) { ws.close(); ws = null; }
+}
+
+// ESC key
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') {
+    if (document.getElementById('profileModal').classList.contains('show')) closeProfileModal();
+    else if (document.getElementById('aboutModal').classList.contains('show')) closeAboutModal();
+    else if (document.getElementById('app').classList.contains('show')) showLanding();
+  }
+});
+
+// Agents Bar
+function renderAgentsBar() {
+  var bar = document.getElementById('agentsBar');
+  var html = '<span class="label">🤖 智能体</span>';
+  agents.forEach(a => {
+    html += `<span class="chip" style="background:${a.color || '#667eea'}">${a.icon || '🤖'} ${esc(a.name)}</span>`;
+  });
+  bar.innerHTML = html;
+}
+
+// ── Announcement (公告栏) ──
+var announcementText = '';
+function loadAnnouncement() {
+  fetch(API_BASE + '/rooms/' + roomId + '/announcement').then(r => r.json()).then(d => {
+    announcementText = d.announcement || '';
+    var bar = document.getElementById('announcementBar');
+    var content = document.getElementById('announcementContent');
+    if (announcementText && bar && content) {
+      content.textContent = announcementText;
+      bar.style.display = 'flex';
+    }
+  }).catch(function() {});
+}
+function closeAnnouncement() {
+  var bar = document.getElementById('announcementBar');
+  if (bar) bar.style.display = 'none';
+}
+
+// ── Game Agent Installation ──
+function checkGameAgentsStatus() {
+  fetch(API_BASE + '/rooms/' + roomId + '/game-agents-status').then(r => r.json()).then(d => {
+    var bar = document.getElementById('gameAgentInstallBar');
+    if (bar && agents.length === 0 && d && !d.all_installed) {
+      bar.style.display = 'flex';
+    }
+  }).catch(function() {});
+}
+function installGameAgents() {
+  var btn = document.getElementById('installGameAgentsBtn');
+  if (btn) { btn.textContent = '⏳ 安装中...'; btn.disabled = true; }
+  fetch(API_BASE + '/rooms/' + roomId + '/install-game-agents', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({user_id: userId, game_type: 'misty_town'})
+  }).then(r => r.json()).then(d => {
+    if (d.success) {
+      toast('✅ ' + (d.message || '游戏智能体安装完成'));
+      // Hide install bar
+      var bar = document.getElementById('gameAgentInstallBar');
+      if (bar) bar.style.display = 'none';
+      // Reload room data
+      fetch(API_BASE + '/rooms/' + roomId).then(r => r.json()).then(d2 => {
+        agents = d2.agents || [];
+        renderAgentsBar();
+        document.getElementById('chatMeta').textContent = agents.length + ' 个智能体 · ' + (roomType === 'official' ? '官方' : '公开');
+      });
+      // Reload announcement
+      loadAnnouncement();
+    } else {
+      toast('❌ ' + (d.detail || '安装失败'));
+      if (btn) { btn.textContent = '🚀 一键安装'; btn.disabled = false; }
+    }
+  }).catch(function() {
+    toast('❌ 网络错误');
+    if (btn) { btn.textContent = '🚀 一键安装'; btn.disabled = false; }
+  });
+}
+
+// Messages
+function loadMessages() {
+  fetch(API_BASE + '/rooms/' + roomId + '/messages?limit=50').then(r => r.json()).then(d => {
+    messages = d.messages || [];
+    renderMessages();
+  });
+}
+
+function renderMessages() {
+  var c = document.getElementById('messages');
+  if (!messages.length) {
+    c.innerHTML = `<div class="empty-state"><div class="icon">💬</div><div class="title">开始聊天</div><div class="desc">发送第一条消息，与 AI 智能体开始群聊</div></div>`;
+    return;
+  }
+  var html = '', lastDate = '';
+  messages.forEach(m => {
+    var d = new Date(m.timestamp);
+    var ds = d.toLocaleDateString('zh-CN', {month:'long',day:'numeric',weekday:'short'});
+    if (ds !== lastDate) { html += `<div class="msg-date"><span>${ds}</span></div>`; lastDate = ds; }
+    if (m.type === 'system') {
+      html += `<div class="msg-row"><div class="msg-body" style="max-width:100%"><div class="msg-bubble system">${esc(m.content)}</div></div></div>`;
+      return;
+    }
+    var isMine = m.sender_id === userId;
+    var isAgent = agents.some(function(a) { return a.id === m.sender_id; });
+    var agent = agents.find(function(a) { return a.id === m.sender_id; });
+    var time = d.toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit'});
+    var avatarBg = agent ? agent.color : (isMine ? '#07C160' : '#10AEFF');
+    var avatarIcon = agent ? (agent.icon || '🤖') : (isMine ? nickname.charAt(0) : m.sender_name.charAt(0));
+    var bubbleContent = '';
+    
+    // Recalled message
+    if (m.recalled) {
+      bubbleContent = '<div class="msg-recalled">' + esc(m.content) + '</div>';
+    }
+    // Reply reference
+    else if (m.reply_to) {
+      var refMsg = messages.find(function(x) { return x.id === m.reply_to; });
+      var refText = refMsg ? (refMsg.content || '').substring(0, 50) : '原消息';
+      var refUser = refMsg ? refMsg.sender_name : '未知';
+      bubbleContent = '<div class="reply-ref" onclick="scrollToMessage(\'' + jsStr(m.reply_to) + '\')">' +
+        '<div class="rr-user">' + esc(refUser) + '</div>' +
+        '<div>' + esc(refText) + (refMsg && (refMsg.content||'').length > 50 ? '...' : '') + '</div>' +
+        '</div>' + esc(m.content);
+    }
+    // Location
+    else if (m.type === 'location') {
+      var lat = m.latitude || 0, lng = m.longitude || 0;
+      var locUrl = 'https://maps.googleapis.com/maps/api/staticmap?center=' + lat + ',' + lng + '&markers=red|' + lat + ',' + lng + '&zoom=15&size=400x200&key=AIzaSyDontNeedRealKeyForDemo';
+      bubbleContent = '<div class="loc-card" onclick="window.open(\'https://maps.google.com/?q=' + lat + ',' + lng + '\',\'_blank\')">' +
+        '<div class="loc-img">📍</div>' +
+        '<div class="loc-info">' +
+        '<div class="loc-name">' + esc(m.content || '📍 位置分享') + '</div>' +
+        '<div class="loc-addr">' + lat.toFixed(4) + ', ' + lng.toFixed(4) + '</div>' +
+        '</div></div>';
+    }
+    // File/Image
+    else if ((m.type === 'file' || m.type === 'image' || m.type === 'video') && m.file_id) {
+      var sizeStr = m.file_size ? formatFileSize(m.file_size) : '';
+      var fname = m.file_name || m.file_id;
+      var isImg = fname.match(/\.(jpg|jpeg|png|gif|webp|svg|bmp)$/i);
+      var isVid = fname.match(/\.(mp4|webm|mov|avi)$/i) || m.type === 'video';
+      if (isImg) {
+        bubbleContent = '<div class="file-card">' +
+          '<img src="' + API_BASE + '/files/' + jsStr(m.file_id) + '/preview" alt="' + esc(fname) + '" onclick="previewImage(\'' + jsStr(API_BASE + '/files/' + m.file_id + '/preview') + '\')" style="max-width:200px;max-height:200px;border-radius:8px;cursor:pointer">' +
+          '<div class="file-info" onclick="downloadFile(\'' + jsStr(m.file_id) + '\')" style="cursor:pointer;padding:6px 0;font-size:12px;color:#666">🖼️ ' + esc(fname) + (sizeStr ? ' (' + sizeStr + ')' : '') + '</div>' +
+          '</div>';
+      } else if (isVid) {
+        bubbleContent = '<div class="file-card" onclick="downloadFile(\'' + jsStr(m.file_id) + '\')" style="cursor:pointer;padding:10px 14px;background:#f5f5f5;border-radius:10px">' +
+          '<div style="font-size:24px;margin-bottom:4px">🎬</div>' +
+          '<div style="font-size:14px;font-weight:500;color:#333">' + esc(fname) + '</div>' +
+          '<div style="font-size:12px;color:#999">' + (sizeStr || '未知大小') + ' · 点击下载播放</div>' +
+          '</div>';
+      } else {
+        bubbleContent = '<div class="file-card" onclick="downloadFile(\'' + jsStr(m.file_id) + '\')" style="cursor:pointer;padding:10px 14px;background:#f5f5f5;border-radius:10px">' +
+          '<div style="font-size:24px;margin-bottom:4px">📎</div>' +
+          '<div style="font-size:14px;font-weight:500;color:#333">' + esc(fname) + '</div>' +
+          '<div style="font-size:12px;color:#999">' + (sizeStr || '未知大小') + ' · 点击下载</div>' +
+          '</div>';
+      }
+    }
+    // Voice
+    else if (m.type === 'voice' && m.file_id) {
+      var vdur = m.duration || 0;
+      bubbleContent = '<div class="voice-msg" onclick="downloadFile(\'' + jsStr(m.file_id) + '\')" style="cursor:pointer;padding:8px 14px;background:#d4f5d4;border-radius:10px;display:inline-flex;align-items:center;gap:8px">' +
+        '<span style="font-size:20px">🔊</span>' +
+        '<span style="font-size:14px;font-weight:500">语音 ' + vdur + 's</span>' +
+        '</div>';
+    } else {
+      bubbleContent = esc(m.content);
+    }
+    
+    html += `<div class="msg-row${isMine ? ' mine' : ''}" data-msgid="${m.id}">` +
+      `<div class="msg-avatar" style="background:${avatarBg}">${avatarIcon}</div>` +
+      `<div class="msg-body">` +
+        `<div class="msg-sender"><span class="name">${isMine ? '我' : esc(m.sender_name)}</span>${isAgent ? '<span class="badge ai">AI</span>' : ''}<span class="time">${time}</span></div>` +
+        `<div class="msg-bubble">${bubbleContent}</div>` +
+      `</div></div>`;
+  });
+  c.innerHTML = html;
+  c.scrollTop = c.scrollHeight;
+}
+
+function esc(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+function jsStr(s) { return String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'"); }
+
+// ── 工具函数 ──
+function formatFileSize(bytes) {
+  if (!bytes || bytes === 0) return '0 B';
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / 1048576).toFixed(1) + ' MB';
+}
+
+function downloadFile(fileId) {
+  window.open(API_BASE + '/files/' + fileId + '/download', '_blank');
+}
+
+function previewImage(url) {
+  document.getElementById('previewImage').src = url;
+  document.getElementById('imagePreviewModal').classList.add('show');
+}
+
+function closeImagePreview() {
+  document.getElementById('imagePreviewModal').classList.remove('show');
+}
+
+// Send
+function sendMessage() {
+  try {
+    var inp = document.getElementById('messageInput');
+    var content = inp.value.trim();
+    if (!content || !roomId) return;
+    inp.value = ''; inp.style.height = 'auto'; updateSendBtn();
+    var mentionIds = [];
+    var mentionRe = /@([^\s]+)/g; var m;
+    while ((m = mentionRe.exec(content)) !== null) {
+      var ag = agents.find(function(a) { return a.name === m[1] || a.id === m[1]; });
+      if (ag) mentionIds.push(ag.id);
+    }
+    var body = {room_id:roomId, user_id:userId, nickname:nickname, content:content, mentions:mentionIds};
+    if (replyToId) body.reply_to = replyToId;
+    var localMsg = {id:'local_'+Date.now(), type:'text', sender_id:userId, sender_name:nickname, content:content, reply_to:replyToId||null, timestamp:new Date().toISOString()};
+    messages.push(localMsg); renderMessages();
+    if (replyToId) { replyToId = null; cancelReply(); }
+    fetch(API_BASE + '/rooms/' + roomId + '/messages', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(body)
+    }).catch(function(e) { console.error(e); messages = messages.filter(function(x) { return x.id !== localMsg.id; }); renderMessages(); toast('❌ 发送失败，请重试'); });
+  } catch(e) { console.error('[sendMessage] error:', e); toast('❌ 发送失败，请重试'); }
+}
+
+function onKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+  setTimeout(function() {
+    var inp = document.getElementById('messageInput');
+    inp.style.height = 'auto'; inp.style.height = Math.min(inp.scrollHeight, 120) + 'px';
+    updateSendBtn();
+  }, 0);
+}
+
+function onInput() { updateSendBtn(); }
+
+function updateSendBtn() {
+  var btn = document.getElementById('sendBtn');
+  if (document.getElementById('messageInput').value.trim()) btn.classList.add('active');
+  else btn.classList.remove('active');
+}
+
+// WebSocket
+function connectWS() {
+  ws = new WebSocket(WS_BASE + '/ws/' + userId);
+  ws.onopen = function() { if (roomId) ws.send(JSON.stringify({type:'join', room_id:roomId})); };
+  ws.onmessage = function(e) {
+    try {
+      var d = JSON.parse(e.data);
+      if (d.type === 'new_message' && d.room_id === roomId) {
+        // 去重：检查消息ID或相同用户+内容+时间（5秒内）
+        var exists = messages.some(function(m) {
+          if (m.id === d.message.id) return true;
+          if (m.sender_id === d.message.sender_id && 
+              m.content === d.message.content &&
+              Math.abs(new Date(m.timestamp) - new Date(d.message.timestamp)) < 5000) return true;
+          return false;
+        });
+        if (!exists) {
+          messages.push(d.message); renderMessages();
+        }
+      } else if (d.type === 'message_recalled' && d.room_id === roomId) {
+        for (var i = 0; i < messages.length; i++) {
+          if (messages[i].id === d.message_id) {
+            messages[i].recalled = true;
+            messages[i].content = d.message.content;
+            break;
+          }
+        }
+        renderMessages();
+      } else if (d.type === 'agent_typing') {
+        var el = document.getElementById('chatMeta');
+        if (el) el.textContent = d.typing ? (d.agent_name + ' 正在输入...') : '';
+      } else if (d.type === 'room_update' && d.room_id === roomId) {
+        if (d.panels) { panels = d.panels; renderPanelTabs(); }
+        if (d.agents) { agents = d.agents; renderAgentsBar(); }
+      }
+    } catch(e) {}
+  };
+  ws.onclose = function() { setTimeout(connectWS, 3000); };
+}
+
+// Plus Menu
+function togglePlusMenu() {
+  document.getElementById('plusMenu').classList.toggle('show');
+}
+
+// Voice Recording
+function startVoiceRecording(e) {
+  e.preventDefault();
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    toast('❌ 浏览器不支持录音'); return;
+  }
+  // iOS Safari doesn't support MediaRecorder
+  if (typeof MediaRecorder === 'undefined') {
+    toast('⚠️ 您的浏览器不支持语音录制（iOS Safari 暂不支持），请使用 Chrome 或 Edge');
+    return;
+  }
+  isRecording = true; isCancelled = false; audioChunks = [];
+  document.getElementById('voiceOverlay').classList.add('show');
+  document.getElementById('voiceOverlay').classList.add('recording');
+  recordingStartTime = Date.now();
+  recordingTimer = setInterval(updateVoiceTime, 200);
+  
+  navigator.mediaDevices.getUserMedia({ audio: true }).then(function(stream) {
+    var mimeOptions = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', ''];
+    var mime = mimeOptions.find(function(opt) { return opt && MediaRecorder.isTypeSupported(opt); }) || '';
+    mediaRecorder = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+    mediaRecorder.ondataavailable = function(ev) { if (ev.data.size > 0) audioChunks.push(ev.data); };
+    mediaRecorder.onstop = function() {
+      stream.getTracks().forEach(function(t) { t.stop(); });
+      if (!isCancelled && audioChunks.length > 0) {
+        var blob = new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+        uploadVoiceBlob(blob);
+      }
+    };
+    mediaRecorder.start(200);
+  }).catch(function() { toast('❌ 麦克风权限被拒绝'); cancelVoiceRecording(); });
+}
+
+function stopVoiceRecording(e) {
+  if (e) e.preventDefault();
+  if (!isRecording) return;
+  isRecording = false;
+  clearInterval(recordingTimer);
+  document.getElementById('voiceOverlay').classList.remove('show');
+  document.getElementById('voiceOverlay').classList.remove('recording');
+  if (mediaRecorder && mediaRecorder.state === 'recording') {
+    mediaRecorder.stop();
+  }
+}
+
+function cancelVoiceRecording() {
+  if (!isRecording) return;
+  isCancelled = true;
+  stopVoiceRecording();
+}
+
+function onVoiceMove(e) {
+  if (!isRecording || !e.touches) return;
+  var dy = e.touches[0].clientY - touchStartY;
+  if (dy < -60) {
+    document.getElementById('cancelHint').style.background = 'rgba(255,0,0,0.6)';
+    document.getElementById('cancelHint').textContent = '🔴 松手取消';
+  } else {
+    document.getElementById('cancelHint').style.background = 'rgba(255,0,0,0.2)';
+    document.getElementById('cancelHint').textContent = '↑ 上滑取消发送';
+  }
+}
+
+function updateVoiceTime() {
+  var secs = Math.floor((Date.now() - recordingStartTime) / 1000);
+  var mins = Math.floor(secs / 60);
+  secs = secs % 60;
+  document.getElementById('voiceTime').textContent = 
+    (mins < 10 ? '0' + mins : mins) + ':' + (secs < 10 ? '0' + secs : secs);
+  if (mins >= 2) { toast('⏰ 最长2分钟'); stopVoiceRecording(); }
+}
+
+function uploadVoiceBlob(blob) {
+  var duration = Math.floor((Date.now() - recordingStartTime) / 1000);
+  if (duration < 1) return;
+  var fd = new FormData();
+  fd.append('file', blob, 'voice_' + duration + 's.webm');
+  fd.append('room_id', roomId);
+  fd.append('user_id', userId);
+  fd.append('nickname', nickname || '访客');
+  fd.append('duration', duration);
+  fetch(API_BASE + '/files/upload', { method: 'POST', body: fd })
+    .then(function(r) { return r.json(); })
+    .then(function() { toast('✅ 语音已发送'); })
+    .catch(function() { toast('❌ 语音发送失败'); });
+}
+
+// File & Image
+function selectFile() { document.getElementById('fileInput').click(); togglePlusMenu(); }
+function selectImage() { document.getElementById('imageInput').click(); togglePlusMenu(); }
+function takePhoto() { togglePlusMenu(); openCamera('photo'); }
+function videoCall() { togglePlusMenu(); openCamera('video'); }
+
+
+// ═══════════════════════════════════════════════════════════════
+//  Panel System (v5.0.0 — Tailchat-style + Give U Face Fusion)
+// ═══════════════════════════════════════════════════════════════
+
+function loadPanels() {
+  fetch(API_BASE + '/rooms/' + roomId + '/panels').then(function(r) { return r.json(); }).then(function(d) {
+    panels = d.panels || [];
+    // Ensure at least one chat panel
+    if (!panels.length || !panels.some(function(p) { return p.type === 'chat'; })) {
+      panels.push({id: 'chat', name: '💬 聊天', type: 'chat', icon: '💬', order: 0});
+    }
+    renderPanelTabs();
+    switchPanel('chat');
+  }).catch(function(e) {
+    console.error('Failed to load panels:', e);
+    panels = [{id: 'chat', name: '💬 聊天', type: 'chat', icon: '💬', order: 0}];
+    renderPanelTabs();
+    switchPanel('chat');
+  });
+}
+
+function renderPanelTabs() {
+  var tabsEl = document.getElementById('panelTabs');
+  if (!tabsEl) return;
+  panels.sort(function(a, b) { return (a.order||0) - (b.order||0); });
+  
+  var html = '';
+  for (var i = 0; i < panels.length; i++) {
+    var p = panels[i];
+    html += '<div class="panel-tab' + (p.id === activePanelId ? ' active' : '') + '" data-panel="' + jsStr(p.id) + '" onclick="switchPanel(' + jsQuote(p.id) + ')">' +
+      '<span class="tab-icon">' + esc(p.icon || '💬') + '</span>' +
+      '<span>' + esc(p.name || '面板') + '</span>' +
+      (p.type !== 'chat' ? '<span class="tab-close" onclick="event.stopPropagation();deletePanel(' + jsQuote(p.id) + ')">×</span>' : '') +
+      '</div>';
+  }
+  html += '<div class="panel-tab-add" onclick="openAddPanel()" title="添加面板">＋</div>';
+  tabsEl.innerHTML = html;
+}
+
+function switchPanel(panelId) {
+  if (!panelId) return;
+  activePanelId = panelId;
+  
+  // Update tab states
+  var tabs = document.getElementById('panelTabs');
+  if (tabs) {
+    var allTabs = tabs.querySelectorAll('.panel-tab');
+    for (var i = 0; i < allTabs.length; i++) {
+      allTabs[i].classList.toggle('active', allTabs[i].getAttribute('data-panel') === panelId);
+    }
+  }
+  
+  // Find panel config
+  var panel = null;
+  for (var i = 0; i < panels.length; i++) {
+    if (panels[i].id === panelId) { panel = panels[i]; break; }
+  }
+  if (!panel) { panel = {id: panelId, name: '💬 聊天', type: 'chat', icon: '💬'}; }
+  
+  var contentEl = document.getElementById('panelContent');
+  if (!contentEl) return;
+  
+  if (panel.type === 'chat') {
+    contentEl.innerHTML = '<div class="panel-view active" id="panelChat">' +
+      '<div class="messages-container" id="messages">' +
+        '<div class="load-more" onclick="loadMoreHistory()">↑ 点击加载更早的消息</div>' +
+      '</div>' +
+    '</div>';
+    renderMessages();
+    var ia = document.querySelector('.input-area');
+    if (ia) ia.style.display = 'flex';
+    var pm = document.getElementById('plusMenu');
+    if (pm) pm.style.display = '';
+  } else if (panel.type === 'webview') {
+    var url = panel.url || '';
+    if (url && !url.startsWith('http://') && !url.startsWith('https://')) url = 'https://' + url;
+    contentEl.innerHTML = '<div class="panel-view active" style="position:relative">' +
+      '<div style="padding:8px 16px;background:#f8f8f8;border-bottom:1px solid #e0e0e0;font-size:12px;color:#999;display:flex;align-items:center;gap:8px">' +
+        '<span>🌐</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(url || '未设置URL') + '</span>' +
+        '<span style="cursor:pointer;padding:4px 8px;color:#999;font-size:18px" onclick="switchPanel(' + jsQuote('chat') + ')" title="关闭">✕</span>' +
+      '</div>' +
+      '<iframe class="panel-webview" src="' + esc(url) + '" sandbox="allow-scripts allow-same-origin allow-forms allow-popups"></iframe>' +
+    '</div>';
+    var ia2 = document.querySelector('.input-area');
+    if (ia2) ia2.style.display = 'none';
+    var pm2 = document.getElementById('plusMenu');
+    if (pm2) pm2.style.display = 'none';
+  } else if (panel.type === 'custom') {
+    // Check if this is the "Discover" panel - render full discover UI
+    if (panel.name.indexOf('发现') >= 0 || panel.icon === '🌐') {
+      renderDiscoverPanel();
+    } else {
+      contentEl.innerHTML = '<div class="panel-view active discover-panel">' +
+        '<div class="discover-card"><h3>📌 ' + esc(panel.name) + '</h3>' +
+        (panel.html || '<p style="color:#999">自定义面板内容</p>') +
+        '</div></div>';
+    }
+    var ia3 = document.querySelector('.input-area');
+    if (ia3) ia3.style.display = 'none';
+  }
+  
+  if (panel.type === 'chat') {
+    setTimeout(scrollToBottom, 200);
+  }
+}
+
+function openAddPanel() {
+  document.getElementById('addPanelModal').classList.add('show');
+  document.getElementById('panelNameInput').value = '';
+  document.getElementById('panelUrlInput').value = '';
+  document.getElementById('panelTypeSelect').value = 'webview';
+}
+
+function closeAddPanel() {
+  document.getElementById('addPanelModal').classList.remove('show');
+}
+
+function addPanel() {
+  var name = document.getElementById('panelNameInput').value.trim();
+  var type = document.getElementById('panelTypeSelect').value;
+  var url = document.getElementById('panelUrlInput').value.trim();
+  
+  if (!name) { toast('请输入面板名称'); return; }
+  if (type === 'webview' && !url) { toast('请输入网址 URL'); return; }
+  
+  fetch(API_BASE + '/rooms/' + roomId + '/panels', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ user_id: userId, name: name, type: type, url: url, icon: type === 'webview' ? '🌐' : '💬' })
+  }).then(function(r) { return r.json(); }).then(function(d) {
+    if (d.success) {
+      toast('✅ 面板「' + name + '」已添加');
+      closeAddPanel();
+      loadPanels();
+    } else {
+      toast('❌ ' + (d.detail || d.error || '添加失败'));
+    }
+  }).catch(function(e) {
+    toast('❌ 网络错误');
+    console.error(e);
+  });
+}
+
+function deletePanel(panelId) {
+  if (!confirm('确定要移除这个面板吗？')) return;
+  
+  fetch(API_BASE + '/rooms/' + roomId + '/panels/' + panelId, {
+    method: 'DELETE',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ user_id: userId })
+  }).then(function(r) { return r.json(); }).then(function(d) {
+    if (d.success) {
+      toast('🗑️ 面板已移除');
+      activePanelId = 'chat';
+      loadPanels();
+    } else {
+      toast('❌ ' + (d.detail || '移除失败'));
+    }
+  }).catch(function(e) {
+    toast('❌ 网络错误');
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Discover / Network Code System (inspired by Give U Face)
+// ═══════════════════════════════════════════════════════════════
+
+function renderDiscoverPanel() {
+  var el = document.getElementById('panelContent');
+  if (!el) return;
+  el.innerHTML = '<div class="panel-view active discover-panel">' +
+    // URL Discover Card
+    '<div class="discover-card">' +
+      '<h3>🌐 发现网站</h3>' +
+      '<div class="dc-input-group">' +
+        '<input id="discoverUrlInput" type="text" placeholder="输入网址，如 agent.bh-jk.com" onkeydown="if(event.key===' + jsQuote('Enter') + ')discoverUrl()">' +
+        '<button onclick="discoverUrl()">🔍 搜索</button>' +
+      '</div>' +
+      '<div class="dc-sub">输入一个网站地址，将以面板形式添加到群聊中</div>' +
+      '<div id="discoverUrlResult"></div>' +
+    '</div>' +
+    // Network Code Card
+    '<div class="discover-card">' +
+      '<h3>🔗 网络识别码</h3>' +
+      '<div class="dc-sub" style="margin-bottom:10px">通过识别码连接其他 P Chat 实例（基于 IPv6 P2P 网络 · Give U Face 融合）</div>' +
+      '<div class="dc-input-group">' +
+        '<input id="networkCodeInput" type="text" placeholder="输入8位/12位识别码" maxlength="12" style="text-transform:uppercase;font-family:monospace" onkeydown="if(event.key===' + jsQuote('Enter') + ')queryNetworkCode()">' +
+        '<button onclick="queryNetworkCode()">🔍 查询</button>' +
+      '</div>' +
+      '<div id="networkCodeResult"></div>' +
+      '<div style="margin-top:10px">' +
+        '<button onclick="registerNetworkCode()" style="padding:8px 16px;background:var(--blue);color:#fff;border:none;border-radius:8px;font-size:13px;cursor:pointer">📋 生成我的识别码</button>' +
+        '<button onclick="loadMyCodes()" style="padding:8px 16px;background:#f0f0f0;border:1px solid #e0e0e0;border-radius:8px;font-size:13px;cursor:pointer;margin-left:8px">📱 我的识别码</button>' +
+      '</div>' +
+    '</div>' +
+    // Discovered Services
+    '<div class="discover-card">' +
+      '<h3>🔎 发现的社区</h3>' +
+      '<div id="discoverServices"><div class="dc-sub">加载中...</div></div>' +
+    '</div>' +
+  '</div>';
+  
+  var ia = document.querySelector('.input-area');
+  if (ia) ia.style.display = 'none';
+  
+  loadDiscoverServices();
+}
+
+function discoverUrl() {
+  var url = (document.getElementById('discoverUrlInput') || {}).value;
+  if (!url || !(url = url.trim())) { toast('请输入网址'); return; }
+  
+  if (!url.startsWith('http://') && !url.startsWith('https://')) url = 'https://' + url;
+  
+  var displayName = url.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+  
+  fetch(API_BASE + '/rooms/' + roomId + '/panels', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ user_id: userId, name: '🌐 ' + displayName, type: 'webview', url: url, icon: '🌐' })
+  }).then(function(r) { return r.json(); }).then(function(d) {
+    var resultEl = document.getElementById('discoverUrlResult');
+    if (d.success) {
+      if (resultEl) resultEl.innerHTML = '<div class="dc-result" style="color:var(--green)">✅ 已添加面板「' + esc(displayName) + '」</div>';
+      toast('✅ 网址已添加为面板');
+      loadPanels();
+    } else {
+      toast('❌ ' + (d.detail || d.error || '添加失败'));
+    }
+  }).catch(function(e) { toast('❌ 网络错误'); });
+}
+
+function registerNetworkCode() {
+  fetch(API_BASE + '/discover/codes/register', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ user_id: userId, nickname: nickname || '访客' })
+  }).then(function(r) { return r.json(); }).then(function(d) {
+    var resultEl = document.getElementById('networkCodeResult');
+    if (d.success) {
+      if (resultEl) resultEl.innerHTML = '<div class="dc-result">' +
+        '<div class="dc-name">🎉 识别码已生成</div>' +
+        '<div class="dc-code">长码: ' + esc(d.network_code) + '</div>' +
+        '<div class="dc-code">短码: ' + esc(d.short_code) + ' <button onclick="navigator.clipboard.writeText(' + jsQuote(d.short_code) + ');toast(' + jsQuote('📋 已复制') + ')" style="padding:2px 8px;border:1px solid #ccc;border-radius:4px;font-size:11px;cursor:pointer">📋 复制</button></div>' +
+        '<div style="font-size:11px;color:#999;margin-top:4px">分享此码给他人连接你 | 有效期7天</div>' +
+      '</div>';
+      loadMyCodes();
+    } else {
+      if (resultEl) resultEl.innerHTML = '<div class="dc-result" style="color:red">❌ ' + esc(d.error || '注册失败') + '</div>';
+    }
+  }).catch(function(e) { toast('❌ 网络错误'); });
+}
+
+function queryNetworkCode() {
+  var code = (document.getElementById('networkCodeInput') || {}).value;
+  if (!code || !(code = code.trim().toUpperCase())) { toast('请输入识别码'); return; }
+  
+  fetch(API_BASE + '/discover/codes/query?code=' + encodeURIComponent(code)).then(function(r) { return r.json(); }).then(function(d) {
+    var resultEl = document.getElementById('networkCodeResult');
+    if (d.success && d.exists) {
+      if (resultEl) resultEl.innerHTML = '<div class="dc-result">' +
+        '<div class="dc-name">👤 ' + esc(d.nickname || '未知用户') + (d.service_name ? ' — ' + esc(d.service_name) : '') + '</div>' +
+        '<div class="dc-code">识别码: ' + esc(d.network_code) + ' | 短码: ' + esc(d.short_code) + '</div>' +
+        '<div style="font-size:11px;color:#999">连接数: ' + (d.connection_count||0) + '</div>' +
+        '<button class="dc-btn connect" onclick="connectNetworkCode(' + jsQuote(d.network_code) + ')">🔗 连接</button>' +
+      '</div>';
+    } else {
+      if (resultEl) resultEl.innerHTML = '<div class="dc-result" style="color:#999">🔍 未找到该识别码（可能已过期）</div>';
+    }
+  }).catch(function(e) { toast('❌ 网络错误'); });
+}
+
+function connectNetworkCode(code) {
+  fetch(API_BASE + '/discover/codes/connect', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ code: code, connector_id: userId, connector_nick: nickname || '访客' })
+  }).then(function(r) { return r.json(); }).then(function(d) {
+    if (d.success) {
+      toast('🔗 已连接到 ' + esc(d.owner_nick || '对方'));
+      queryNetworkCode();
+    } else {
+      toast('❌ ' + (d.error || '连接失败'));
+    }
+  }).catch(function(e) { toast('❌ 网络错误'); });
+}
+
+function loadDiscoverServices() {
+  fetch(API_BASE + '/discover/codes/discover').then(function(r) { return r.json(); }).then(function(d) {
+    var el = document.getElementById('discoverServices');
+    if (!el) return;
+    var services = d.services || [];
+    if (!services.length) {
+      el.innerHTML = '<div class="dc-sub">暂时没有可发现的社区。<br>点击「生成我的识别码」创建第一个！</div>';
+      return;
+    }
+    var html = '<ul class="dc-services">';
+    for (var i = 0; i < services.length; i++) {
+      var s = services[i];
+      html += '<li>' +
+        '<div class="svc-icon">🌐</div>' +
+        '<div class="svc-info">' +
+          '<div class="svc-name">' + esc(s.nickname || s.service_name || '匿名') + '</div>' +
+          '<div class="svc-code">' + esc(s.short_code) + ' · ' + (s.connection_count||0) + ' 人连接</div>' +
+        '</div>' +
+        '<button class="dc-btn connect" onclick="connectNetworkCode(' + jsQuote(s.network_code) + ')" style="font-size:11px;padding:4px 10px">连接</button>' +
+      '</li>';
+    }
+    html += '</ul>';
+    el.innerHTML = html;
+  }).catch(function(e) {
+    var el2 = document.getElementById('discoverServices');
+    if (el2) el2.innerHTML = '<div class="dc-sub" style="color:#999">无法加载发现列表（API 未就绪）</div>';
+  });
+}
+
+function loadMyCodes() {
+  fetch(API_BASE + '/discover/codes/my?user_id=' + encodeURIComponent(userId)).then(function(r) { return r.json(); }).then(function(d) {
+    var codes = d.codes || [];
+    var resultEl = document.getElementById('networkCodeResult');
+    if (resultEl && codes.length > 0) {
+      var c = codes[0];
+      var extra = '<div style="margin-top:8px;border-top:1px solid #f0f0f0;padding-top:8px">' +
+        '<div style="font-size:12px;color:#999;margin-bottom:4px">📋 我的识别码</div>' +
+        '<div class="my-code-item">' +
+          '<div class="mc-icon">📋</div>' +
+          '<div class="mc-info">' +
+            '<div class="mc-code">' + esc(c.short_code) + '</div>' +
+            '<div class="mc-meta">连接: ' + (c.connection_count||0) + ' · ' + (c.status === 'active' ? '✅ 活跃' : '⏰ 已过期') + '</div>' +
+          '</div>' +
+          '<div class="mc-actions">' +
+            '<button class="btn-share" onclick="navigator.clipboard.writeText(' + jsQuote(c.short_code) + ');toast(' + jsQuote('📋 已复制') + ')">📋 复制</button>' +
+            '<button class="btn-revoke" onclick="revokeCode(' + jsQuote(c.session_code) + ')">🗑</button>' +
+          '</div>' +
+        '</div></div>';
+      resultEl.innerHTML += extra;
+    }
+  }).catch(function() {});
+}
+
+function revokeCode(sessionCode) {
+  if (!confirm('确定撤销此识别码？所有连接将断开。')) return;
+  fetch(API_BASE + '/discover/codes/revoke', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ session_code: sessionCode, user_id: userId })
+  }).then(function(r) { return r.json(); }).then(function(d) {
+    if (d.success) { toast('🗑️ 已撤销'); loadMyCodes(); }
+    else { toast('❌ ' + (d.error || '操作失败')); }
+  }).catch(function() { toast('❌ 网络错误'); });
+}
+
+function jsQuote(s) { return "'" + String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "'"; }
+function scrollToBottom() {
+  var el = document.getElementById('messages');
+  if (el) el.scrollTop = el.scrollHeight;
+}
+
+
+// ── Camera / Video (WeChat-style) ──
+var camStream = null, camFacingMode = 'environment', camMode = 'photo';
+var capturedBlob = null, videoRecorder = null, videoChunks = [], vidRecStartTime = 0, vidRecTimer = null;
+
+function openCamera(mode) {
+  camMode = mode;
+  document.getElementById('cameraModal').classList.add('show');
+  document.getElementById('camTitle').textContent = mode === 'video' ? '🎬 录制视频' : '📷 拍照';
+  document.getElementById('camCapture').style.display = mode === 'video' ? 'none' : '';
+  document.getElementById('recTimer').style.display = mode === 'video' ? '' : 'none';
+  document.getElementById('camSwitch').style.display = '';
+  document.getElementById('camDone').classList.remove('show');
+  document.getElementById('camRetake').classList.remove('show');
+  document.getElementById('camPreview').style.display = 'none';
+  document.getElementById('camVideo').style.display = '';
+  capturedBlob = null; videoChunks = [];
+  startCamera();
+}
+
+function closeCamera() {
+  stopCameraStream();
+  document.getElementById('cameraModal').classList.remove('show');
+  if (videoRecorder && videoRecorder.state === 'recording') videoRecorder.stop();
+  clearInterval(vidRecTimer);
+}
+
+function stopCameraStream() {
+  if (camStream) { camStream.getTracks().forEach(function(t) { t.stop(); }); camStream = null; }
+}
+
+function startCamera() {
+  stopCameraStream();
+  var constraints = { video: { facingMode: camFacingMode, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: camMode === 'video' };
+  navigator.mediaDevices.getUserMedia(constraints).then(function(stream) {
+    camStream = stream;
+    document.getElementById('camVideo').srcObject = stream;
+    if (camMode === 'video') startVideoRecording(stream);
+  }).catch(function() { toast('❌ 摄像头/麦克风权限被拒绝'); closeCamera(); });
+}
+
+function switchCamera() {
+  camFacingMode = camFacingMode === 'user' ? 'environment' : 'user';
+  startCamera();
+}
+
+function capturePhoto() {
+  if (!camStream) return;
+  var video = document.getElementById('camVideo');
+  var canvas = document.createElement('canvas');
+  canvas.width = video.videoWidth || 640; canvas.height = video.videoHeight || 480;
+  canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+  canvas.toBlob(function(blob) {
+    capturedBlob = blob;
+    document.getElementById('camPreviewImg').src = URL.createObjectURL(blob);
+    document.getElementById('camPreview').style.display = '';
+    document.getElementById('camVideo').style.display = 'none';
+    document.getElementById('camCapture').style.display = 'none';
+    document.getElementById('camDone').classList.add('show');
+    document.getElementById('camRetake').classList.add('show');
+    document.getElementById('camSwitch').style.display = 'none';
+  }, 'image/jpeg', 0.85);
+}
+
+function retakePhoto() {
+  capturedBlob = null;
+  document.getElementById('camPreview').style.display = 'none';
+  document.getElementById('camVideo').style.display = '';
+  document.getElementById('camCapture').style.display = '';
+  document.getElementById('camDone').classList.remove('show');
+  document.getElementById('camRetake').classList.remove('show');
+  document.getElementById('camSwitch').style.display = '';
+}
+
+function sendCaptured() {
+  if (!capturedBlob) return;
+  var fd = new FormData();
+  fd.append('file', capturedBlob, 'photo_' + Date.now() + '.jpg');
+  fd.append('room_id', roomId);
+  fd.append('user_id', userId);
+  fd.append('nickname', nickname || '访客');
+  showUploadProgress(true);
+  fetch(API_BASE + '/images/upload', { method: 'POST', body: fd })
+    .then(function(r) { return r.json(); })
+    .then(function() { showUploadProgress(false); closeCamera(); toast('✅ 照片已发送'); })
+    .catch(function() { showUploadProgress(false); toast('❌ 发送失败'); });
+}
+
+function startVideoRecording(stream) {
+  if (typeof MediaRecorder === 'undefined') { toast('⚠️ 不支持视频录制'); return; }
+  videoChunks = [];
+  var mimeOptions = ['video/webm;codecs=vp8,opus', 'video/webm', 'video/mp4', ''];
+  var mime = mimeOptions.find(function(opt) { return opt && MediaRecorder.isTypeSupported(opt); }) || '';
+  videoRecorder = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+  videoRecorder.ondataavailable = function(ev) { if (ev.data.size > 0) videoChunks.push(ev.data); };
+  videoRecorder.onstop = function() {
+    clearInterval(vidRecTimer);
+    if (videoChunks.length > 0) {
+      capturedBlob = new Blob(videoChunks, { type: videoRecorder.mimeType || 'video/webm' });
+      document.getElementById('camPreviewImg').src = URL.createObjectURL(capturedBlob);
+      document.getElementById('camPreview').style.display = '';
+      document.getElementById('camVideo').style.display = 'none';
+      document.getElementById('camDone').classList.add('show');
+      document.getElementById('camRetake').classList.add('show');
+      document.getElementById('recTimer').style.display = 'none';
+    }
+    stopCameraStream();
+  };
+  videoRecorder.start(200);
+  vidRecStartTime = Date.now();
+  updateVideoTimer();
+  vidRecTimer = setInterval(updateVideoTimer, 200);
+  // Auto-stop at 30 seconds
+  setTimeout(function() { if (videoRecorder && videoRecorder.state === 'recording') videoRecorder.stop(); }, 30000);
+}
+
+function updateVideoTimer() {
+  var secs = Math.floor((Date.now() - vidRecStartTime) / 1000);
+  var mins = Math.floor(secs / 60); secs = secs % 60;
+  document.getElementById('recTimer').innerHTML = '<span class="rec-dot"></span> ' + (mins < 10 ? '0' + mins : mins) + ':' + (secs < 10 ? '0' + secs : secs);
+}
+
+// ── @Mention ──
+function updateMentionDropdown() {
+  var inp = document.getElementById('messageInput');
+  var val = inp.value, pos = inp.selectionStart;
+  var lastAt = val.lastIndexOf('@', pos - 1);
+  var dropdown = document.getElementById('mentionDropdown');
+  if (lastAt === -1 || !agents.length) { dropdown.classList.remove('show'); return; }
+  var afterAt = val.substring(lastAt + 1, pos);
+  if (afterAt.includes(' ') || afterAt.includes('\n')) { dropdown.classList.remove('show'); return; }
+  var filtered = agents.filter(function(a) {
+    return a.name.toLowerCase().includes(afterAt.toLowerCase()) || a.id.toLowerCase().includes(afterAt.toLowerCase());
+  });
+  if (!filtered.length) { dropdown.classList.remove('show'); return; }
+  // Position dropdown above the textarea
+  var rect = inp.getBoundingClientRect();
+  dropdown.style.left = rect.left + 'px';
+  dropdown.style.bottom = (window.innerHeight - rect.top + 4) + 'px';
+  dropdown.style.width = rect.width + 'px';
+  dropdown.style.position = 'fixed';
+  var html = '';
+  filtered.forEach(function(a) {
+    var safeName = a.name.replace(/'/g, "\\'");
+    html += '<div class="mention-item" onclick="insertMention(\'' + safeName + '\', ' + lastAt + ')">' +
+      '<div class="mi-avatar" style="background:' + (a.color || '#07C160') + '">' + (a.icon || '🤖') + '</div>' +
+      '<div><div class="mi-name">' + esc(a.name) + '</div><div class="mi-id">@' + a.id + '</div></div>' +
+      '</div>';
+  });
+  dropdown.innerHTML = html;
+  dropdown.classList.add('show');
+}
+
+function insertMention(name, atPos) {
+  var inp = document.getElementById('messageInput');
+  var val = inp.value, pos = inp.selectionStart;
+  var before = val.substring(0, atPos);
+  var after = val.substring(pos);
+  inp.value = before + '@' + name + ' ' + after;
+  inp.focus();
+  inp.selectionStart = inp.selectionEnd = atPos + name.length + 2;
+  document.getElementById('mentionDropdown').classList.remove('show');
+  updateSendBtn();
+}
+
+// Update onInput to detect @
+var _origOnInput = onInput;
+onInput = function() {
+  try { _origOnInput(); } catch(e) { console.error(e); }
+  try { updateMentionDropdown(); } catch(e) { console.error(e); }
+};
+
+// ── Reply / Context Menu (Long Press) ──
+var replyToId = null, ctxMessageId = null;
+
+function cancelReply() {
+  replyToId = null; ctxMessageId = null;
+  document.getElementById('replyBar').classList.remove('show');
+  document.getElementById('replyPreview').innerHTML = '';
+}
+
+function scrollToMessage(id) {
+  // Highlight and scroll — simple approach: find in DOM
+  var messagesDiv = document.getElementById('messages');
+  // Re-render with highlight
+  renderMessages();
+  setTimeout(function() {
+    var el = messagesDiv.querySelector('[data-msgid="' + id + '"]');
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, 100);
+}
+
+function showContextMenu(msgId, x, y) {
+  ctxMessageId = msgId;
+  var menu = document.getElementById('ctxMenu');
+  menu.style.left = x + 'px'; menu.style.top = y + 'px';
+  menu.classList.add('show');
+  // Adjust if off screen
+  var rect = menu.getBoundingClientRect();
+  if (rect.right > window.innerWidth) menu.style.left = (window.innerWidth - rect.width - 10) + 'px';
+  if (rect.bottom > window.innerHeight) menu.style.top = (window.innerHeight - rect.height - 10) + 'px';
+}
+
+function hideContextMenu() {
+  document.getElementById('ctxMenu').classList.remove('show');
+}
+
+document.addEventListener('click', function(e) {
+  if (!e.target.closest('.ctx-menu')) hideContextMenu();
+  if (!e.target.closest('.mention-dropdown') && !e.target.closest('#messageInput')) 
+    document.getElementById('mentionDropdown').classList.remove('show');
+});
+
+function ctxCopy() {
+  var msg = messages.find(function(m) { return m.id === ctxMessageId; });
+  if (msg) copyText(msg.content);
+  hideContextMenu();
+}
+
+function ctxReply() {
+  var msg = messages.find(function(m) { return m.id === ctxMessageId; });
+  if (msg) {
+    replyToId = msg.id;
+    document.getElementById('replyPreview').innerHTML = '<span class="rp-user">' + esc(msg.sender_name) + '</span>: ' + esc((msg.content || '').substring(0, 60));
+    document.getElementById('replyBar').classList.add('show');
+    document.getElementById('messageInput').focus();
+  }
+  hideContextMenu();
+}
+
+function ctxRecall() {
+  var msg = messages.find(function(m) { return m.id === ctxMessageId; });
+  if (!msg || msg.sender_id !== userId) { toast('❌ 只能撤回自己的消息'); hideContextMenu(); return; }
+  fetch(API_BASE + '/rooms/' + roomId + '/messages/' + ctxMessageId, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user_id: userId })
+  }).then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.success) toast('✅ 已撤回');
+      else toast('❌ ' + (d.detail || '撤回失败'));
+    })
+    .catch(function() { toast('❌ 网络错误'); });
+  hideContextMenu();
+}
+
+// Long press handler for messages
+function initLongPress() {
+  var mc = document.getElementById('messages');
+  var timer, startX, startY;
+  mc.addEventListener('touchstart', function(e) {
+    var el = e.target.closest('.msg-bubble');
+    if (!el) return;
+    var row = el.closest('.msg-row');
+    var msgId = row ? row.getAttribute('data-msgid') : null;
+    if (!msgId) return;
+    startX = e.touches[0].clientX; startY = e.touches[0].clientY;
+    timer = setTimeout(function() { showContextMenu(msgId, startX, startY); }, 500);
+  }, { passive: false });
+  mc.addEventListener('touchend', function() { clearTimeout(timer); });
+  mc.addEventListener('touchmove', function(e) {
+    if (!timer) return;
+    var dx = e.touches[0].clientX - startX, dy = e.touches[0].clientY - startY;
+    if (Math.abs(dx) > 10 || Math.abs(dy) > 10) clearTimeout(timer);
+  });
+  // Desktop right-click
+  mc.addEventListener('contextmenu', function(e) {
+    var el = e.target.closest('.msg-bubble');
+    if (!el) return;
+    var row = el.closest('.msg-row');
+    var msgId = row ? row.getAttribute('data-msgid') : null;
+    if (!msgId) return;
+    e.preventDefault();
+    showContextMenu(msgId, e.clientX, e.clientY);
+  });
+}
+
+// ── Search (WeChat-style chat history search) ──
+function openSearch() {
+  document.getElementById('searchPanel').classList.add('show');
+  document.getElementById('spInput').value = '';
+  document.getElementById('spResults').innerHTML = '';
+  document.getElementById('spCount').textContent = '';
+  setTimeout(function() { document.getElementById('spInput').focus(); }, 100);
+}
+
+function closeSearch() {
+  document.getElementById('searchPanel').classList.remove('show');
+}
+
+function doSearch() {
+  var q = document.getElementById('spInput').value.trim();
+  if (!q || q.length < 2) { document.getElementById('spResults').innerHTML = '<div class="sp-empty">输入至少2个字符</div>'; document.getElementById('spCount').textContent = ''; return; }
+  fetch(API_BASE + '/rooms/' + roomId + '/messages/search?q=' + encodeURIComponent(q) + '&limit=50')
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      document.getElementById('spCount').textContent = '找到 ' + d.total + ' 条（显示最近 ' + d.returned + ' 条）';
+      if (!d.messages.length) { document.getElementById('spResults').innerHTML = '<div class="sp-empty">未找到相关消息</div>'; return; }
+      var html = '';
+      d.messages.forEach(function(m) {
+        var dt = new Date(m.timestamp);
+        var time = dt.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' }) + ' ' + dt.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+        html += '<div class="sp-result" onclick="scrollToMsgAndClose(\'' + jsStr(m.id) + '\')">' +
+          '<div class="sr-time">' + time + ' · ' + esc(m.sender_name) + '</div>' +
+          '<div class="sr-content">' + esc(m.content) + '</div>' +
+          '</div>';
+      });
+      document.getElementById('spResults').innerHTML = html;
+    });
+}
+
+function scrollToMsgAndClose(id) {
+  closeSearch();
+  setTimeout(function() {
+    var el = document.querySelector('[data-msgid="' + id + '"]');
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, 300);
+}
+
+// ── Location Share ──
+function shareLocation() {
+  togglePlusMenu();
+  if (!navigator.geolocation) { toast('❌ 浏览器不支持定位'); return; }
+  toast('📍 正在获取位置...');
+  navigator.geolocation.getCurrentPosition(function(pos) {
+    var lat = pos.coords.latitude, lng = pos.coords.longitude;
+    fetch(API_BASE + '/rooms/' + roomId + '/location', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room_id: roomId, user_id: userId, nickname: nickname || '访客', content: '📍 位置分享', latitude: lat, longitude: lng })
+    }).then(function() { toast('✅ 位置已分享'); })
+      .catch(function() { toast('❌ 发送失败'); });
+  }, function() { toast('❌ 无法获取位置，请检查定位权限'); }, { enableHighAccuracy: true, timeout: 10000 });
+}
+
+// ── Load More History ──
+var allLoaded = false;
+function loadMoreHistory() {
+  if (allLoaded) { toast('已加载全部消息'); return; }
+  fetch(API_BASE + '/rooms/' + roomId + '/messages?limit=200')
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.messages && d.messages.length) {
+        var existingIds = {};
+        messages.forEach(function(m) { existingIds[m.id] = true; });
+        var newMsgs = d.messages.filter(function(m) { return !existingIds[m.id]; });
+        if (newMsgs.length === 0) { allLoaded = true; toast('已加载全部消息'); }
+        else { messages = newMsgs.concat(messages); renderMessages(); toast('✅ 加载了 ' + newMsgs.length + ' 条历史消息'); }
+      }
+    });
+}
+
+// Init long press after DOM ready
+document.addEventListener('DOMContentLoaded', function() { initLongPress(); });
+// Also init immediately since script is at bottom
+setTimeout(function() { initLongPress(); }, 500);
+
+function onFileSelected(e) {
+  var file = e.target.files[0];
+  if (!file) return;
+  if (file.size > 50 * 1024 * 1024) { toast('❌ 文件不能超过50MB'); return; }
+  showUploadProgress(true);
+  var fd = new FormData();
+  fd.append('file', file);
+  fd.append('room_id', roomId);
+  fd.append('user_id', userId);
+  fd.append('nickname', nickname || '访客');
+  fetch(API_BASE + '/files/upload', { method: 'POST', body: fd })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      showUploadProgress(false);
+      if (d.success) toast('✅ 文件已发送');
+      else toast('❌ 上传失败');
+    })
+    .catch(function() { showUploadProgress(false); toast('❌ 网络错误'); });
+}
+
+function onImageSelected(e) {
+  var file = e.target.files[0];
+  if (!file) return;
+  if (file.size > 10 * 1024 * 1024) { toast('❌ 图片不能超过10MB'); return; }
+  showUploadProgress(true);
+  var fd = new FormData();
+  fd.append('file', file);
+  fd.append('room_id', roomId);
+  fd.append('user_id', userId);
+  fd.append('nickname', nickname || '访客');
+  fetch(API_BASE + '/images/upload', { method: 'POST', body: fd })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      showUploadProgress(false);
+      if (d.success) toast('✅ 图片已发送');
+      else toast('❌ 上传失败');
+    })
+    .catch(function() { showUploadProgress(false); toast('❌ 网络错误'); });
+}
+
+function showUploadProgress(show) {
+  var el = document.getElementById('uploadProgress');
+  if (show) el.classList.add('show'); else el.classList.remove('show');
+}
+
+// Share - 分享弹窗
+var shareModalVisible = false;
+
+function copyLink() {
+  // 显示分享弹窗
+  showShareModal();
+}
+
+function showShareModal() {
+  var overlay = document.getElementById('shareOverlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'shareOverlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:500;display:flex;align-items:center;justify-content:center;';
+    overlay.onclick = function(e) { if (e.target === overlay) overlay.remove(); };
+    overlay.innerHTML = '<div class="share-card" style="background:#fff;border-radius:16px;padding:24px;width:90%;max-width:380px;box-shadow:0 8px 30px rgba(0,0,0,0.15)" onclick="event.stopPropagation()">' +
+      '<h3 style="margin:0 0 16px;font-size:18px">🔗 分享聊天室</h3>' +
+      '<div style="margin-bottom:12px"><label style="font-size:13px;color:#666;display:block;margin-bottom:4px">密码（留空则无需密码）</label>' +
+      '<input id="sharePwd" type="text" placeholder="设置访问密码" style="width:100%;padding:10px 12px;border:1px solid #e0e0e0;border-radius:10px;font-size:14px;box-sizing:border-box"></div>' +
+      '<div style="margin-bottom:16px"><label style="font-size:13px;color:#666;display:block;margin-bottom:4px">过期时间</label>' +
+      '<select id="shareExpiry" style="width:100%;padding:10px 12px;border:1px solid #e0e0e0;border-radius:10px;font-size:14px;box-sizing:border-box">' +
+      '<option value="0">永久有效</option><option value="1">1天后过期</option><option value="3">3天后过期</option><option value="7" selected>7天后过期</option><option value="30">30天后过期</option></select></div>' +
+      '<button id="shareGenBtn" style="width:100%;padding:12px;background:#07C160;color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer">🚀 生成分享链接</button>' +
+      '<div id="shareResult" style="display:none;margin-top:12px;padding:12px;background:#f5f5f5;border-radius:10px;word-break:break-all;font-size:13px"></div>' +
+      '<div id="shareQR" style="display:none;text-align:center;margin-top:10px"></div>' +
+      '<button id="shareCloseBtn" style="width:100%;margin-top:12px;padding:10px;background:#f0f0f0;border:none;border-radius:10px;cursor:pointer">关闭</button>' +
+      '</div>';
+    document.body.appendChild(overlay);
+    
+    document.getElementById('shareCloseBtn').onclick = function() { overlay.remove(); };
+    document.getElementById('shareGenBtn').onclick = generateShareLink;
+  }
+  overlay.style.display = 'flex';
+}
+
+function generateShareLink() {
+  var pwd = document.getElementById('sharePwd').value.trim();
+  var expiry = parseInt(document.getElementById('shareExpiry').value);
+  var btn = document.getElementById('shareGenBtn');
+  btn.textContent = '⏳ 生成中...'; btn.disabled = true;
+  
+  fetch(API_BASE + '/share/' + roomId, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({password: pwd, expiry_days: expiry})
+  }).then(r => r.json()).then(d => {
+    btn.textContent = '🚀 生成分享链接'; btn.disabled = false;
+    if (d.success) {
+      var fullUrl = location.origin + d.share_url;
+      document.getElementById('shareResult').style.display = 'block';
+      document.getElementById('shareResult').innerHTML = '<div style="display:flex;gap:8px;align-items:center">' +
+        '<span style="flex:1;font-size:13px;color:#07C160">' + fullUrl + '</span>' +
+        '<button onclick="copyText(\'' + jsStr(fullUrl) + '\')" style="background:#07C160;color:#fff;border:none;border-radius:6px;padding:6px 12px;cursor:pointer;font-size:12px;white-space:nowrap">📋 复制</button></div>';
+      
+      document.getElementById('shareQR').style.display = 'block';
+      document.getElementById('shareQR').innerHTML = '<img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&margin=6&data=' + encodeURIComponent(fullUrl) + '" style="border-radius:6px;width:150px;height:150px" alt="QR"><div style="font-size:11px;color:#999;margin-top:4px">📱 扫码加入群聊</div>';
+    } else {
+      toast('❌ 生成失败');
+    }
+  }).catch(function() {
+    btn.textContent = '🚀 生成分享链接'; btn.disabled = false;
+    toast('❌ 网络错误');
+  });
+}
+
+function copyText(text) {
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(text).then(function() { toast('✅ 已复制！'); });
+  } else {
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    toast('✅ 已复制！');
+  }
+}
+
+// Toast
+function toast(text) {
+  var el = document.createElement('div'); el.className = 'toast'; el.textContent = text;
+  document.body.appendChild(el); setTimeout(() => el.remove(), 2500);
+}
+</script>
+</body>
+</html>

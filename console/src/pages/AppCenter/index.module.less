@@ -615,13 +615,13 @@
 // WeChat mini-program style capsule button
 .floatingCapsule {
   position: fixed;
-  top: 24px;
-  right: 24px;
+  top: 0px;
+  right: 16px;
   z-index: 1001;
   display: flex;
   align-items: center;
-  height: 36px;
-  border: 1px solid rgba(255, 255, 255, 0.3);
+  height: 30px;
+  border: 0px solid rgba(255, 255, 255, 0.3);
   border-radius: 18px;
   background: rgba(0, 0, 0, 0.5);
   backdrop-filter: blur(12px) saturate(180%);
@@ -750,9 +750,9 @@
 
   // ═══ 框架自动处理安全区域 ═══
   // 应用无需任何配置，自动避开胶囊按钮
-  padding: calc(0px + var(--pawapp-safe-area-top, 0px))
+  padding: calc(16px + var(--pawapp-safe-area-top, 0px))
     calc(16px + var(--pawapp-safe-area-right, 0px))
-    calc(0px + var(--pawapp-safe-area-bottom, 0px))
+    calc(16px + var(--pawapp-safe-area-bottom, 0px))
     calc(16px + var(--pawapp-safe-area-left, 0px));
   box-sizing: border-box;
 

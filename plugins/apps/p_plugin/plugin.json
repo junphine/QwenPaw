@@ -1,0 +1,44 @@
+{
+  "id": "p_plugin",
+  "name": "P",
+  "version": "5.5.1",
+  "description": "v5.5.1 - 这是个实验性版本，限于文件包不能超过5M,功能一点点抠着，一个AI群聊的应用， 双显示模式注册 + 文件上传修复 +叙事游戏区可玩性强化。",
+  "author": "0+1+2≠3 Team 115886",
+  "type": "app",
+  "entry": {
+    "backend": "p_plugin_main.py",
+    "frontend": "ui/index.js"
+  },
+  "qwenpaw_version": {
+    "min": "2.0.1"
+  },
+  "menu": {
+    "label": "P",
+    "icon": "Q",
+    "description": "AI 群聊平台 - 多智能体实时协作",
+    "location": "primary.agentScoped"
+  },
+  "meta": {
+    "pawapp": {
+      "icon": "Q",
+      "category": "productivity",
+      "entry_page": "/apps/p_plugin",
+      "launch_scope": "page"
+    },
+    "category": "productivity",
+    "tags": ["ai-group-chat", "wechat", "p-plugin", "multi-agent"],
+    "permissions": {
+      "chat": true,
+      "storage": true
+    },
+    "settings": [],
+    "channels": {
+      "wechat": {
+        "enabled": true,
+        "agent_id": "p_chat",
+        "agent_name": "P-Chat",
+        "welcome_message": "👋 你好！我是 P-Chat 🤖\n\n我可以帮你创建 AI 群聊房间，与多个智能体一起实时聊天！\n\n快速开始：\n• 输入「创建房间」开始新的 AI 群聊\n• 输入「房间列表」查看所有房间\n• 直接发送消息即可参与群聊"
+      }
+    }
+  }
+}

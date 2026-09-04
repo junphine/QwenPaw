@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>迷雾小镇 - 章节流程</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    min-height: 100vh;
+    color: #e8e8e8;
+    padding: 20px;
+}
+.container {
+    max-width: 1400px;
+    margin: 0 auto;
+}
+header {
+    text-align: center;
+    padding: 20px 0;
+    margin-bottom: 30px;
+}
+h1 {
+    font-size: 2em;
+    color: #e94560;
+    text-shadow: 0 0 20px rgba(233, 69, 96, 0.5);
+}
+.subtitle {
+    color: #888;
+    margin-top: 10px;
+}
+
+/* 流程图容器 */
+.flow-container {
+    display: flex;
+    gap: 40px;
+    padding: 20px;
+    overflow-x: auto;
+    min-height: 600px;
+}
+
+/* 章节列 */
+.chapter-column {
+    flex: 0 0 300px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+.chapter-header {
+    background: linear-gradient(135deg, #e94560, #ff6b6b);
+    padding: 15px;
+    border-radius: 12px;
+    text-align: center;
+    font-weight: bold;
+    font-size: 1.1em;
+    box-shadow: 0 4px 15px rgba(233, 69, 96, 0.3);
+}
+.chapter-header.locked {
+    background: linear-gradient(135deg, #444, #666);
+    opacity: 0.6;
+}
+.chapter-header.completed {
+    background: linear-gradient(135deg, #4ecdc4, #44a08d);
+}
+
+/* 节点卡片 */
+.node-card {
+    background: rgba(255,255,255,0.08);
+    border: 2px solid rgba(255,255,255,0.1);
+    border-radius: 12px;
+    padding: 15px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    position: relative;
+}
+.node-card:hover {
+    border-color: #e94560;
+    transform: translateY(-3px);
+    box-shadow: 0 5px 20px rgba(233, 69, 96, 0.2);
+}
+.node-card.completed {
+    border-color: #4ecdc4;
+    background: rgba(78, 205, 196, 0.1);
+}
+.node-card.current {
+    border-color: #e94560;
+    box-shadow: 0 0 20px rgba(233, 69, 96, 0.4);
+    animation: pulse 2s infinite;
+}
+.node-card.locked {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+@keyframes pulse {
+    0%, 100% { box-shadow: 0 0 20px rgba(233, 69, 96, 0.4); }
+    50% { box-shadow: 0 0 30px rgba(233, 69, 96, 0.6); }
+}
+
+.node-type {
+    font-size: 0.75em;
+    color: #888;
+    margin-bottom: 5px;
+    text-transform: uppercase;
+}
+.node-title {
+    font-weight: bold;
+    color: #fff;
+    margin-bottom: 8px;
+}
+.node-desc {
+    font-size: 0.9em;
+    color: #aaa;
+    line-height: 1.4;
+}
+.node-reward {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(255,255,255,0.1);
+    font-size: 0.85em;
+    color: #4ecdc4;
+}
+.node-status {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    font-size: 1.2em;
+}
+
+/* 连接线 */
+.connector {
+    position: absolute;
+    width: 2px;
+    background: linear-gradient(to bottom, #e94560, #4ecdc4);
+    left: 50%;
+    transform: translateX(-50%);
+}
+
+/* 侧边栏 */
+.sidebar {
+    position: fixed;
+    right: 20px;
+    top: 100px;
+    width: 280px;
+    background: rgba(0,0,0,0.3);
+    border-radius: 16px;
+    padding: 20px;
+    border: 1px solid rgba(255,255,255,0.1);
+}
+.sidebar h3 {
+    color: #e94560;
+    margin-bottom: 15px;
+    font-size: 1.1em;
+}
+.progress-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 10px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+.progress-label {
+    color: #888;
+}
+.progress-value {
+    color: #4ecdc4;
+    font-weight: bold;
+}
+.npc-status {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 0;
+}
+.npc-avatar {
+    font-size: 1.5em;
+}
+.npc-info {
+    flex: 1;
+}
+.npc-name {
+    font-weight: bold;
+    color: #fff;
+}
+.npc-affection {
+    font-size: 0.85em;
+    color: #888;
+}
+.affection-bar {
+    height: 4px;
+    background: rgba(255,255,255,0.1);
+    border-radius: 2px;
+    margin-top: 5px;
+}
+.affection-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #e94560, #ff6b6b);
+    border-radius: 2px;
+    transition: width 0.5s ease;
+}
+
+/* 操作按钮 */
+.action-bar {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 15px;
+    background: rgba(0,0,0,0.5);
+    padding: 15px 30px;
+    border-radius: 50px;
+    border: 1px solid rgba(255,255,255,0.2);
+}
+.action-btn {
+    padding: 12px 24px;
+    background: linear-gradient(135deg, #e94560, #ff6b6b);
+    border: none;
+    border-radius: 25px;
+    color: #fff;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+.action-btn:hover {
+    transform: scale(1.05);
+    box-shadow: 0 5px 20px rgba(233, 69, 96, 0.4);
+}
+.action-btn.secondary {
+    background: rgba(255,255,255,0.1);
+}
+
+/* 提示框 */
+.tooltip {
+    position: fixed;
+    bottom: 100px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(233, 69, 96, 0.9);
+    padding: 15px 30px;
+    border-radius: 12px;
+    font-size: 0.95em;
+    animation: fadeInOut 5s forwards;
+}
+@keyframes fadeInOut {
+    0%, 100% { opacity: 0; transform: translateX(-50%) translateY(20px); }
+    10%, 90% { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+/* 响应式 */
+@media (max-width: 1200px) {
+    .sidebar {
+        display: none;
+    }
+}
+</style>
+</head>
+<body>
+<div class="container">
+    <header>
+        <h1>🏛️ 迷雾小镇</h1>
+        <p class="subtitle">章节流程图 - 点击节点查看详情或在聊天中@对应角色</p>
+    </header>
+    
+    <div class="flow-container" id="flowContainer">
+        <!-- 章节1：序章 -->
+        <div class="chapter-column">
+            <div class="chapter-header current">
+                📖 序章：迷雾降临
+            </div>
+            
+            <div class="node-card current" onclick="showNodeDetail('intro')">
+                <div class="node-type">开场</div>
+                <div class="node-title">🌫️ 迷雾笼罩</div>
+                <div class="node-desc">你来到迷雾小镇，浓雾中空无一人，远处传来钟声...</div>
+                <div class="node-status">✓</div>
+            </div>
+            
+            <div class="node-card" onclick="showNodeDetail('meet-keeper')">
+                <div class="node-type">对话</div>
+                <div class="node-title">🏛️ 遇见老陈</div>
+                <div class="node-desc">在灯塔下遇到沉默的守塔人，他似乎知道些什么</div>
+                <div class="node-reward">💡 可能获得线索</div>
+            </div>
+            
+            <div class="node-card" onclick="showNodeDetail('meet-xiaolu')">
+                <div class="node-type">对话</div>
+                <div class="node-title">☕ 咖啡馆闲聊</div>
+                <div class="node-desc">小鹿似乎消息灵通，但她会告诉你吗？</div>
+                <div class="node-reward">💡 可能获得线索</div>
+            </div>
+        </div>
+        
+        <!-- 章节2：疑云 -->
+        <div class="chapter-column">
+            <div class="chapter-header locked">
+                🔍 第一章：疑云密布
+                <br><small style="font-size:0.8em;color:#aaa">解锁条件：收集2个线索</small>
+            </div>
+            
+            <div class="node-card locked">
+                <div class="node-type">调查</div>
+                <div class="node-title">🩺 诊所的秘密</div>
+                <div class="node-desc">林医生总在深夜出入灯塔，她在研究什么？</div>
+                <div class="node-reward">🔓 解锁新地点</div>
+            </div>
+            
+            <div class="node-card locked">
+                <div class="node-type">对峙</div>
+                <div class="node-title">🎩 镇长的警告</div>
+                <div class="node-desc">镇长警告你不要多管闲事，他似乎在隐瞒什么</div>
+                <div class="node-reward">⚡ 关键抉择</div>
+            </div>
+            
+            <div class="node-card locked">
+                <div class="node-type">探索</div>
+                <div class="node-title">🔦 灯塔地下室</div>
+                <div class="node-desc">老陈提到地下室有暗门，要问他才能进入</div>
+                <div class="node-reward">📜 重要文件</div>
+            </div>
+        </div>
+        
+        <!-- 章节3：真相 -->
+        <div class="chapter-column">
+            <div class="chapter-header locked">
+                💀 第二章：真相大白
+                <br><small style="font-size:0.8em;color:#aaa">解锁条件：收集6个线索</small>
+            </div>
+            
+            <div class="node-card locked">
+                <div class="node-type">揭秘</div>
+                <div class="node-title">🕯️ 失踪之谜</div>
+                <div class="node-desc">老陈挚友的失踪与镇长有关，真相即将浮出水面</div>
+            </div>
+            
+            <div class="node-card locked">
+                <div class="node-type">决战</div>
+                <div class="node-title">⚔️ 最终对峙</div>
+                <div class="node-desc">面对镇长，你掌握了多少证据？</div>
+                <div class="node-reward">🏆 决定结局</div>
+            </div>
+            
+            <div class="node-card locked">
+                <div class="node-type">结局</div>
+                <div class="node-title">🌅 迷雾散去</div>
+                <div class="node-desc">根据你的选择和收集的线索，迎来不同结局</div>
+                <div class="node-reward">🎉 游戏通关</div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 侧边栏 -->
+    <div class="sidebar">
+        <h3>📊 游戏进度</h3>
+        <div class="progress-item">
+            <span class="progress-label">已解锁线索</span>
+            <span class="progress-value">1/12</span>
+        </div>
+        <div class="progress-item">
+            <span class="progress-label">当前章节</span>
+            <span class="progress-value">序章</span>
+        </div>
+        <div class="progress-item">
+            <span class="progress-label">游戏时长</span>
+            <span class="progress-value">15分钟</span>
+        </div>
+        
+        <h3 style="margin-top:20px;">🎭 NPC好感度</h3>
+        <div class="npc-status">
+            <span class="npc-avatar">🏛️</span>
+            <div class="npc-info">
+                <div class="npc-name">老陈</div>
+                <div class="npc-affection">好感度: 5/100</div>
+                <div class="affection-bar">
+                    <div class="affection-fill" style="width: 2.5%"></div>
+                </div>
+            </div>
+        </div>
+        <div class="npc-status">
+            <span class="npc-avatar">☕</span>
+            <div class="npc-info">
+                <div class="npc-name">小鹿</div>
+                <div class="npc-affection">好感度: 20/100</div>
+                <div class="affection-bar">
+                    <div class="affection-fill" style="width: 10%"></div>
+                </div>
+            </div>
+        </div>
+        <div class="npc-status">
+            <span class="npc-avatar">🩺</span>
+            <div class="npc-info">
+                <div class="npc-name">林医生</div>
+                <div class="npc-affection">好感度: 0/100</div>
+                <div class="affection-bar">
+                    <div class="affection-fill" style="width: 0%"></div>
+                </div>
+            </div>
+        </div>
+        <div class="npc-status">
+            <span class="npc-avatar">🎩</span>
+            <div class="npc-info">
+                <div class="npc-name">镇长</div>
+                <div class="npc-affection">好感度: -5/100</div>
+                <div class="affection-bar">
+                    <div class="affection-fill" style="width: 0%"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 操作栏 -->
+    <div class="action-bar">
+        <button class="action-btn" onclick="sendToChat('@老陈 你好，我想了解一下灯塔')">💬 继续对话</button>
+        <button class="action-btn secondary" onclick="sendToChat('@游戏大师 查看进度')">📊 查看状态</button>
+        <button class="action-btn secondary" onclick="sendToChat('@游戏大师 提示')">💡 获取提示</button>
+    </div>
+    
+    <!-- 提示 -->
+    <div class="tooltip" id="tooltip">
+        💡 提示：点击节点可在聊天中自动@对应角色，或在聊天界面直接发送消息
+    </div>
+</div>
+
+<script>
+// 节点详情
+function showNodeDetail(nodeId) {
+    const nodeData = {
+        'intro': { title: '🌫️ 迷雾笼罩', desc: '你来到迷雾小镇...', action: '' },
+        'meet-keeper': { title: '🏛️ 遇见老陈', desc: '在灯塔下遇到沉默的守塔人', action: '@老陈 你好，我想了解一下灯塔' },
+        'meet-xiaolu': { title: '☕ 咖啡馆闲聊', desc: '小鹿似乎消息灵通', action: '@小鹿 听说你消息很灵通？' }
+    };
+    
+    const data = nodeData[nodeId];
+    if (data && data.action) {
+        sendToChat(data.action);
+    }
+}
+
+// 发送消息到聊天
+function sendToChat(message) {
+    // 通过parent.postMessage通知外层聊天界面
+    if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+            type: 'game_action',
+            action: 'send_message',
+            message: message
+        }, '*');
+    }
+    
+    // 显示提示
+    showTooltip(`已发送: ${message}`);
+}
+
+// 显示提示
+function showTooltip(text) {
+    const tooltip = document.getElementById('tooltip');
+    tooltip.textContent = text;
+    tooltip.style.animation = 'none';
+    setTimeout(() => {
+        tooltip.style.animation = 'fadeInOut 3s forwards';
+    }, 10);
+}
+
+// 接收来自聊天界面的消息
+window.addEventListener('message', function(e) {
+    if (e.data && e.data.type === 'game_update') {
+        updateProgress(e.data.progress);
+    }
+});
+
+// 更新进度
+function updateProgress(progress) {
+    // 更新节点状态
+    document.querySelectorAll('.node-card').forEach((card, index) => {
+        if (index < progress.completedNodes) {
+            card.classList.add('completed');
+            card.querySelector('.node-status').textContent = '✓';
+        }
+    });
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,246 @@
+{
+  "templates": {
+    "misty_town": {
+      "id": "misty_town",
+      "name": "🏛️ 迷雾小镇",
+      "description": "悬疑探案类AI叙事游戏，玩家通过对话揭开小镇秘密",
+      "category": "悬疑",
+      "difficulty": "中等",
+      "estimated_time": "30-60分钟",
+      "chapters": 3,
+      "npc_count": 4,
+      "default_config": {
+        "title": "迷雾小镇",
+        "subtitle": "揭开迷雾背后的真相",
+        "theme": {
+          "primary_color": "#e94560",
+          "secondary_color": "#16213e",
+          "background": "linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)"
+        },
+        "chapters": [
+          {
+            "id": "prologue",
+            "name": "序章：迷雾降临",
+            "unlock_condition": "auto",
+            "nodes": [
+              {
+                "id": "intro",
+                "type": "story",
+                "title": "🌫️ 迷雾笼罩",
+                "description": "你来到迷雾小镇，浓雾中空无一人，远处传来钟声...",
+                "completed": false
+              },
+              {
+                "id": "meet-keeper",
+                "type": "dialogue",
+                "title": "🏛️ 遇见老陈",
+                "description": "在灯塔下遇到沉默的守塔人，他似乎知道些什么",
+                "npc": "keeper",
+                "reward": "线索",
+                "completed": false
+              },
+              {
+                "id": "meet-xiaolu",
+                "type": "dialogue",
+                "title": "☕ 咖啡馆闲聊",
+                "description": "小鹿似乎消息灵通，但她会告诉你吗？",
+                "npc": "xiaolu",
+                "reward": "线索",
+                "completed": false
+              }
+            ]
+          },
+          {
+            "id": "chapter1",
+            "name": "第一章：疑云密布",
+            "unlock_condition": "clues >= 2",
+            "nodes": [
+              {
+                "id": "clinic-secret",
+                "type": "investigation",
+                "title": "🩺 诊所的秘密",
+                "description": "林医生总在深夜出入灯塔，她在研究什么？",
+                "npc": "ling",
+                "reward": "解锁新地点",
+                "completed": false
+              },
+              {
+                "id": "mayor-warning",
+                "type": "confrontation",
+                "title": "🎩 镇长的警告",
+                "description": "镇长警告你不要多管闲事，他似乎在隐瞒什么",
+                "npc": "mayor",
+                "reward": "关键抉择",
+                "completed": false
+              },
+              {
+                "id": "basement",
+                "type": "exploration",
+                "title": "🔦 灯塔地下室",
+                "description": "老陈提到地下室有暗门，要问他才能进入",
+                "npc": "keeper",
+                "requirement": "好感度 > 30",
+                "reward": "重要文件",
+                "completed": false
+              }
+            ]
+          },
+          {
+            "id": "chapter2",
+            "name": "第二章：真相大白",
+            "unlock_condition": "clues >= 6",
+            "nodes": [
+              {
+                "id": "missing-mystery",
+                "type": "revelation",
+                "title": "🕯️ 失踪之谜",
+                "description": "老陈挚友的失踪与镇长有关，真相即将浮出水面",
+                "completed": false
+              },
+              {
+                "id": "final-confrontation",
+                "type": "battle",
+                "title": "⚔️ 最终对峙",
+                "description": "面对镇长，你掌握了多少证据？",
+                "npc": "mayor",
+                "reward": "决定结局",
+                "completed": false
+              },
+              {
+                "id": "ending",
+                "type": "ending",
+                "title": "🌅 迷雾散去",
+                "description": "根据你的选择和收集的线索，迎来不同结局",
+                "reward": "游戏通关",
+                "completed": false
+              }
+            ]
+          }
+        ],
+        "npcs": [
+          {
+            "id": "keeper",
+            "name": "老陈",
+            "avatar": "🏛️",
+            "location": "灯塔",
+            "personality": "沉默寡言、警觉、内心善良但表面冷漠",
+            "background": "迷雾小镇的灯塔守塔人，在此守护了三十年。曾有一位挚友在灯塔中失踪，至今下落不明。",
+            "initial_affection": 0,
+            "secrets": [
+              {"text": "灯塔地下室有暗门", "unlock_affection": 30},
+              {"text": "挚友的失踪与镇长有关", "unlock_affection": 50},
+              {"text": "午夜能听到灯塔传来奇怪的声音", "unlock_affection": 70}
+            ],
+            "dialogue_style": "简短、回避直接问题、在信任后会打开心扉"
+          },
+          {
+            "id": "ling",
+            "name": "林医生",
+            "avatar": "🩺",
+            "location": "诊所",
+            "personality": "表面热情周到、实际心思深沉、善于伪装",
+            "background": "小镇唯一的诊所医生，三个月前才搬来。她的医术高明，但总在深夜独自出入灯塔方向。",
+            "initial_affection": 5,
+            "secrets": [
+              {"text": "不是真正的医生", "unlock_affection": 30},
+              {"text": "在研究迷雾中的特殊物质", "unlock_affection": 50},
+              {"text": "药物含有致幻成分", "unlock_affection": 70}
+            ],
+            "dialogue_style": "温柔体贴、总是关心你的身体、回避个人问题"
+          },
+          {
+            "id": "xiaolu",
+            "name": "小鹿",
+            "avatar": "☕",
+            "location": "咖啡馆",
+            "personality": "开朗活泼、消息灵通、喜欢八卦但知道分寸",
+            "background": "咖啡馆'雾灯'的老板娘，土生土长的小镇人。她的咖啡馆是镇上信息集散地。",
+            "initial_affection": 15,
+            "secrets": [
+              {"text": "亲眼见过灯塔半夜发出蓝光", "unlock_affection": 20},
+              {"text": "镇长警告过她不要多管闲事", "unlock_affection": 40},
+              {"text": "有一张小镇旧地图", "unlock_affection": 60}
+            ],
+            "dialogue_style": "活泼话多、喜欢用反问引导话题、会在闲聊中夹带线索"
+          },
+          {
+            "id": "mayor",
+            "name": "镇长",
+            "avatar": "🎩",
+            "location": "镇公所",
+            "personality": "威严、控制欲强、表面公正实则心机深沉",
+            "background": "担任镇长已十五年，深受部分居民信任。最近他似乎在寻找什么东西，态度越来越焦躁。",
+            "initial_affection": -10,
+            "secrets": [
+              {"text": "在灯塔地下室藏有重要文件", "unlock_affection": 40},
+              {"text": "挚友的失踪与他直接相关", "unlock_affection": 60},
+              {"text": "迷雾的出现与他的秘密实验有关", "unlock_affection": 80}
+            ],
+            "dialogue_style": "官方腔调、喜欢反客为主、在压力下会露出破绽"
+          }
+        ],
+        "mechanics": {
+          "affection_system": {
+            "enabled": true,
+            "range": [-100, 100],
+            "tiers": [
+              {"max": -20, "label": "敌视", "color": "#ff4444"},
+              {"max": 0, "label": "冷漠", "color": "#888888"},
+              {"max": 20, "label": "中立", "color": "#ffff44"},
+              {"max": 60, "label": "友善", "color": "#44ff44"},
+              {"max": 100, "label": "亲密", "color": "#ff44ff"}
+            ]
+          },
+          "secret_system": {
+            "enabled": true,
+            "total_secrets": 12
+          },
+          "chapter_system": {
+            "enabled": true,
+            "auto_advance": false
+          }
+        }
+      }
+    },
+    "fantasy_adventure": {
+      "id": "fantasy_adventure",
+      "name": "🏰 奇幻冒险",
+      "description": "魔法世界探险游戏，组建队伍挑战魔王",
+      "category": "奇幻",
+      "difficulty": "简单",
+      "estimated_time": "20-40分钟",
+      "chapters": 4,
+      "npc_count": 5
+    },
+    "sci-fi_exploration": {
+      "id": "sci-fi_exploration",
+      "name": "🚀 星际探索",
+      "description": "太空科幻冒险，探索未知星球",
+      "category": "科幻",
+      "difficulty": "困难",
+      "estimated_time": "45-90分钟",
+      "chapters": 5,
+      "npc_count": 6
+    },
+    "horror_survival": {
+      "id": "horror_survival",
+      "name": "🏥 医院惊魂",
+      "description": "恐怖生存游戏，逃离废弃医院",
+      "category": "恐怖",
+      "difficulty": "困难",
+      "estimated_time": "30-50分钟",
+      "chapters": 3,
+      "npc_count": 4
+    },
+    "custom": {
+      "id": "custom",
+      "name": "🎨 自定义",
+      "description": "从零开始创建你自己的AI叙事游戏",
+      "category": "自定义",
+      "difficulty": "灵活",
+      "estimated_time": "自定义",
+      "chapters": 0,
+      "npc_count": 0
+    }
+  }
+}

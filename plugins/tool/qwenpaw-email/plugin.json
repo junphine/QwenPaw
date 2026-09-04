@@ -1,0 +1,18 @@
+{
+  "id": "qwenpaw-email",
+  "name": "QwenPaw Email",
+  "version": "2.0.0",
+  "type": "tool",
+  "description": "发邮件、读收件箱、搜索邮件、回复邮件；支持 QQ/Gmail/163/Outlook 及 OpenClaw 托管服务",
+  "author": "Aristotle Agent",
+  "license": "Apache-2.0",
+  "entry": {
+    "backend": "plugin.py"
+  },
+  "dependencies": [
+    "pyyaml>=6.0"
+  ],
+  "qwenpaw_version": {
+    "min": "1.0.0"
+  }
+}

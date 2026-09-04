@@ -115,7 +115,7 @@ def _read_roots() -> list[Path]:
         Path("/etc/resolv.conf"),
         Path("/etc/ssl/certs").resolve(),
         Path("/etc/pki/tls/certs").resolve(),
-        Path(sys.base_prefix).resolve(),
+        Path(sys.base_prefix).resolve().parent, # modify@byron
         Path(sys.executable).resolve(),
         Path(sys.prefix).resolve(),
         source_root,

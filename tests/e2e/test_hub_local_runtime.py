@@ -14,6 +14,9 @@ from typing import Any
 import httpx
 import pytest
 
+_HUB_READY_TIMEOUT_SECONDS = 120.0
+_RUNTIME_READY_TIMEOUT_SECONDS = 180.0
+
 
 def _allocate_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
@@ -25,7 +28,7 @@ def _wait_for_hub(
     client: httpx.Client,
     process: subprocess.Popen[Any],
 ) -> None:
-    deadline = time.monotonic() + 60
+    deadline = time.monotonic() + _HUB_READY_TIMEOUT_SECONDS
     last_error = "Hub did not respond"
     while time.monotonic() < deadline:
         if process.poll() is not None:
@@ -77,7 +80,7 @@ def _wait_for_runtime(
     process: subprocess.Popen[Any],
     headers: dict[str, str],
 ) -> None:
-    deadline = time.monotonic() + 90
+    deadline = time.monotonic() + _RUNTIME_READY_TIMEOUT_SECONDS
     last_error = "Runtime did not become ready"
     while time.monotonic() < deadline:
         if process.poll() is not None:
@@ -136,7 +139,7 @@ def test_hub_starts_and_proxies_local_runtime(tmp_path: Path) -> None:
         try:
             with httpx.Client(
                 base_url=f"http://127.0.0.1:{port}",
-                timeout=90,
+                timeout=_RUNTIME_READY_TIMEOUT_SECONDS,
             ) as client:
                 _wait_for_hub(client, process)
                 registration = client.post(

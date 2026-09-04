@@ -1,0 +1,1357 @@
+"""
+P Plugin v3.8.0 - Multi-Channel AI Group Chat
+- QwenPaw channel integration: accessible from WeChat, DingTalk, Feishu, Console, etc.
+- Agent tools registered: p_create_room, p_list_rooms, p_send_room_message, etc.
+- Only room creator can manage agents (add/remove)
+- Real QwenPaw agents with shared conversation context
+- WeChat channel: P-Chat agent for creating rooms and managing group chats
+"""
+import logging
+import os
+import json
+import uuid
+import asyncio
+import re
+import base64
+import mimetypes
+import hashlib
+from typing import Dict, List, Optional, Any, Set
+from datetime import datetime, timedelta
+from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
+from enum import Enum
+import httpx
+
+from fastapi import APIRouter, Request, HTTPException, UploadFile, File, Form, Query, WebSocket, WebSocketDisconnect
+from fastapi.responses import JSONResponse, FileResponse
+from pydantic import BaseModel, Field
+
+logger = logging.getLogger("p_plugin")
+
+# ============ Configuration ============
+CURRENT_VERSION = "3.8.1"
+PLUGIN_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
+DATA_DIR = PLUGIN_DIR / "data"
+FILES_DIR = DATA_DIR / "files"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+FILES_DIR.mkdir(parents=True, exist_ok=True)
+
+QWENPAW_API_BASE = os.environ.get("QWENPAW_API", "http://127.0.0.1:8088")
+
+# WeChat user room mapping
+_wechat_user_rooms: Dict[str, str] = {}
+
+# ============ Enums ============
+class MessageType(str, Enum):
+    TEXT = "text"
+    IMAGE = "image"
+    FILE = "file"
+    SYSTEM = "system"
+
+class RoomType(str, Enum):
+    OFFICIAL = "official"
+    PUBLIC = "public"
+    PRIVATE = "private"
+
+# ============ Models ============
+class AgentConfig(BaseModel):
+    id: str
+    name: str
+    icon: str = "🤖"
+    color: str = "#07C160"
+    description: str = ""
+    personality: str = "helpful and friendly"
+    is_active: bool = True
+    auto_reply: bool = True
+    added_by: Optional[str] = None
+    added_at: Optional[str] = None
+
+class Room(BaseModel):
+    id: str
+    name: str
+    type: RoomType
+    creator_id: str
+    creator_nickname: str
+    agents: List[AgentConfig] = []
+    password: Optional[str] = None
+    created_at: str
+    updated_at: str
+
+class Message(BaseModel):
+    id: str
+    room_id: str
+    sender_id: str
+    sender_name: str
+    content: str
+    type: MessageType = MessageType.TEXT
+    mentions: List[str] = []
+    timestamp: str
+    file_id: Optional[str] = None
+    file_name: Optional[str] = None
+    file_size: Optional[int] = None
+
+class FileInfo(BaseModel):
+    id: str
+    room_id: str
+    sender_id: str
+    sender_name: str
+    file_name: str
+    file_size: int
+    mime_type: str
+    created_at: str
+
+# ============ Storage ============
+_rooms: Dict[str, Room] = {}
+_messages: Dict[str, List[Message]] = {}
+_files: Dict[str, FileInfo] = {}
+_qwenpaw_agents_cache: Optional[List[AgentConfig]] = None
+
+# Agent conversation context storage: room_id -> agent_id -> [messages]
+_agent_contexts: Dict[str, Dict[str, List[Dict]]] = {}
+
+# ============ WebSocket Manager ============
+class ConnectionManager:
+    def __init__(self):
+        self.connections: Dict[str, WebSocket] = {}
+        self.room_subscriptions: Dict[str, Set[str]] = {}
+    
+    async def connect(self, websocket: WebSocket, client_id: str):
+        await websocket.accept()
+        self.connections[client_id] = websocket
+    
+    def disconnect(self, client_id: str):
+        if client_id in self.connections:
+            del self.connections[client_id]
+        for subs in self.room_subscriptions.values():
+            subs.discard(client_id)
+    
+    def subscribe(self, client_id: str, room_id: str):
+        if room_id not in self.room_subscriptions:
+            self.room_subscriptions[room_id] = set()
+        self.room_subscriptions[room_id].add(client_id)
+    
+    async def broadcast_to_room(self, room_id: str, message: dict):
+        if room_id not in self.room_subscriptions:
+            return
+        disconnected = []
+        for client_id in self.room_subscriptions[room_id]:
+            if client_id in self.connections:
+                try:
+                    await self.connections[client_id].send_json(message)
+                except:
+                    disconnected.append(client_id)
+            else:
+                disconnected.append(client_id)
+        for client_id in disconnected:
+            self.room_subscriptions[room_id].discard(client_id)
+
+manager = ConnectionManager()
+router = APIRouter()
+
+# ============ Helpers ============
+def _generate_id() -> str:
+    return f"{uuid.uuid4().hex[:16]}"
+
+def _hash_password(password: str) -> str:
+    return hashlib.sha256(password.encode()).hexdigest()
+
+def _save_data():
+    try:
+        data = {
+            "rooms": {k: v.dict() for k, v in _rooms.items()},
+            "messages": {k: [m.dict() for m in v] for k, v in _messages.items()},
+            "files": {k: v.dict() for k, v in _files.items()}
+        }
+        with open(DATA_DIR / "data.json", "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.error(f"[P] Save failed: {e}")
+
+def _load_data():
+    global _rooms, _messages, _files
+    try:
+        data_file = DATA_DIR / "data.json"
+        if data_file.exists():
+            with open(data_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                _rooms = {k: Room(**v) for k, v in data.get("rooms", {}).items()}
+                _messages = {k: [Message(**m) for m in v] for k, v in data.get("messages", {}).items()}
+                _files = {k: FileInfo(**v) for k, v in data.get("files", {}).items()}
+    except Exception as e:
+        logger.error(f"[P] Load failed: {e}")
+
+# ============ QwenPaw Integration ============
+
+async def fetch_qwenpaw_agents() -> List[AgentConfig]:
+    """Fetch real agents from QwenPaw"""
+    global _qwenpaw_agents_cache
+    
+    if _qwenpaw_agents_cache:
+        return _qwenpaw_agents_cache
+    
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(f"{QWENPAW_API_BASE}/api/agents")
+            if resp.status_code == 200:
+                data = resp.json()
+                agents = data.get("agents", [])
+                result = []
+                for a in agents:
+                    agent = AgentConfig(
+                        id=a.get("id"),
+                        name=a.get("name", "AI"),
+                        icon=a.get("icon", "🤖"),
+                        color=a.get("color", "#07C160"),
+                        description=a.get("description", ""),
+                        personality=a.get("personality", "helpful"),
+                        is_active=True,
+                        auto_reply=True
+                    )
+                    result.append(agent)
+                _qwenpaw_agents_cache = result
+                logger.info(f"[P] Loaded {len(result)} real agents from QwenPaw")
+                return result
+    except Exception as e:
+        logger.warning(f"[P] Failed to fetch QwenPaw agents: {e}")
+    
+    # Fallback default agents
+    return [
+        AgentConfig(id="assistant", name="AI助手", icon="🤖", color="#07C160",
+                   description="通用AI助手", personality="helpful and knowledgeable"),
+        AgentConfig(id="coder", name="代码专家", icon="👨‍💻", color="#10AEFF",
+                   description="编程专家", personality="technical and precise"),
+        AgentConfig(id="analyst", name="数据分析师", icon="📊", color="#FA9D3B",
+                   description="数据分析", personality="analytical and insightful"),
+    ]
+
+async def call_agent_with_context(agent_id: str, agent_name: str, personality: str, 
+                                   room_id: str, user_msg: Message, all_messages: List[Message]) -> str:
+    """Call agent with shared conversation context"""
+    try:
+        # Initialize agent context for this room
+        if room_id not in _agent_contexts:
+            _agent_contexts[room_id] = {}
+        if agent_id not in _agent_contexts[room_id]:
+            _agent_contexts[room_id][agent_id] = []
+        
+        # Get recent conversation (last 15 messages)
+        context_messages = all_messages[-15:]
+        
+        # Build conversation history
+        conversation_history = []
+        for msg in context_messages:
+            if msg.type == MessageType.SYSTEM:
+                continue
+            conversation_history.append({
+                "role": "assistant" if msg.sender_id != user_msg.sender_id else "user",
+                "name": msg.sender_name,
+                "content": msg.content
+            })
+        
+        # Add current user message
+        conversation_history.append({
+            "role": "user",
+            "name": user_msg.sender_name,
+            "content": user_msg.content
+        })
+        
+        # Create system prompt
+        system_prompt = f"""You are {agent_name}. {personality}
+
+You are participating in a group chat with other AI agents and human users.
+Guidelines:
+- Be natural, helpful, and concise (2-3 sentences)
+- Consider the conversation context
+- Don't repeat what other agents have said
+- Respond as yourself with your unique personality
+- If you don't have something meaningful to add, you can skip responding"""
+
+        # Try to call agent via QwenPaw API
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                # Try the agents chat endpoint
+                response = await client.post(
+                    f"{QWENPAW_API_BASE}/api/agents/{agent_id}/chat",
+                    json={
+                        "message": user_msg.content,
+                        "system_prompt": system_prompt,
+                        "context": conversation_history[:-1],  # Exclude current message
+                        "session_id": f"p_plugin:{room_id}:{agent_id}",
+                        "room_context": True
+                    }
+                )
+                if response.status_code == 200:
+                    result = response.json()
+                    reply = result.get("response", result.get("content", ""))
+                    if reply:
+                        # Store in agent context
+                        _agent_contexts[room_id][agent_id].append({
+                            "role": "assistant",
+                            "content": reply,
+                            "timestamp": datetime.now().isoformat()
+                        })
+                        return reply
+        except Exception as e:
+            logger.debug(f"[P] Agent API failed for {agent_name}: {e}")
+        
+        # Fallback: Generate contextual response
+        return _generate_contextual_response(agent_name, personality, conversation_history)
+        
+    except Exception as e:
+        logger.error(f"[P] Agent call failed for {agent_name}: {e}")
+        return f"[{agent_name} 暂时不可用]"
+
+def _generate_contextual_response(agent_name: str, personality: str, conversation_history: List[Dict]) -> str:
+    """Generate a contextual response based on conversation history"""
+    import random
+    
+    # Get last few messages for context
+    recent_msgs = conversation_history[-5:]
+    user_msg = recent_msgs[-1] if recent_msgs else None
+    
+    if not user_msg:
+        return f"你好！我是 {agent_name}，很高兴加入这个群聊。"
+    
+    user_content = user_msg.get("content", "").lower()
+    
+    # Context-aware responses
+    if "你好" in user_content or "hello" in user_content:
+        greetings = [
+            f"你好！我是 {agent_name}，很高兴见到你！",
+            f"嗨！{agent_name} 在此，有什么可以帮你的吗？",
+            f"你好呀！我是 {agent_name}，准备好聊天了！"
+        ]
+        return random.choice(greetings)
+    
+    if "谢谢" in user_content or "thanks" in user_content:
+        thanks = [
+            "不客气！随时为你效劳。",
+            "很高兴能帮到你！",
+            "没问题，有需要随时叫我。"
+        ]
+        return random.choice(thanks)
+    
+    if "?" in user_content or "？" in user_content:
+        questions = [
+            f"这是个好问题！作为 {agent_name}，我认为...",
+            f"让我想想...根据我的理解，",
+            f"有趣的问题！我的看法是..."
+        ]
+        return random.choice(questions)
+    
+    # Generic contextual responses
+    responses = {
+        "Default": [
+            "我理解了。请继续分享你的想法。",
+            "这是个有趣的话题，我很乐意参与讨论。",
+            "明白了，我在听。",
+            "好的，继续说吧。"
+        ],
+        "QA Agent": [
+            "这确实值得探讨。根据我的知识...",
+            "我理解你的意思。需要我详细解释吗？",
+            "这是个好观点。我可以补充一些信息。",
+            "明白了。还有其他问题吗？"
+        ],
+        "CloudPaw-Master": [
+            "收到，正在处理你的请求。",
+            "了解，我会协调好这件事。",
+            "明白了，让我来安排。",
+            "好的，正在为你处理。"
+        ],
+        "Assistant": [
+            "好的，我在这里协助你。",
+            "明白了，有什么具体需要我做的吗？",
+            "没问题，我会尽力帮助你。",
+            "收到，随时为你服务。"
+        ],
+        "Helper": [
+            "需要帮忙吗？我在这里。",
+            "好的，让我看看能怎么帮你。",
+            "收到，有什么我可以协助的？",
+            "没问题，随时待命。"
+        ]
+    }
+    
+    agent_responses = responses.get(agent_name, [
+        "我明白了。",
+        "请继续。",
+        "我在听。",
+        "好的。"
+    ])
+    
+    return random.choice(agent_responses)
+
+# ============ API Routes ============
+
+@router.get("/agents")
+async def get_agents():
+    """Get available agents with health status"""
+    agents = await fetch_qwenpaw_agents()
+    
+    # Check agent health
+    health_status = {}
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            # Try to check if agents API is accessible
+            resp = await client.get(f"{QWENPAW_API_BASE}/api/agents")
+            health_status["api_accessible"] = resp.status_code == 200
+    except Exception as e:
+        health_status["api_accessible"] = False
+        health_status["error"] = str(e)
+    
+    return JSONResponse({
+        "agents": [a.dict() for a in agents],
+        "health": health_status,
+        "count": len(agents)
+    })
+
+@router.get("/agents/{agent_id}/health")
+async def check_agent_health(agent_id: str):
+    """Check if specific agent is available"""
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            # Try to call agent
+            resp = await client.post(
+                f"{QWENPAW_API_BASE}/api/agents/{agent_id}/chat",
+                json={"message": "hello", "session_id": f"health_check:{agent_id}"},
+                timeout=10.0
+            )
+            return JSONResponse({
+                "agent_id": agent_id,
+                "available": resp.status_code == 200,
+                "status_code": resp.status_code
+            })
+    except Exception as e:
+        return JSONResponse({
+            "agent_id": agent_id,
+            "available": False,
+            "error": str(e)
+        })
+
+@router.get("/rooms")
+async def get_rooms(user_id: str):
+    """Get all rooms"""
+    return JSONResponse({"rooms": [r.dict() for r in _rooms.values()]})
+
+@router.post("/rooms/create")
+async def create_room(request: Request):
+    """Create new room"""
+    body = await request.json()
+    
+    room_id = _generate_id()
+    room = Room(
+        id=room_id,
+        name=body.get("name", "New Room"),
+        type=RoomType(body.get("type", "public")),
+        creator_id=body.get("user_id", "anonymous"),
+        creator_nickname=body.get("nickname", "Anonymous"),
+        agents=[],
+        password=_hash_password(body.get("password", "")) if body.get("password") else None,
+        created_at=datetime.now().isoformat(),
+        updated_at=datetime.now().isoformat()
+    )
+    
+    _rooms[room_id] = room
+    _messages[room_id] = []
+    
+    _messages[room_id].append(Message(
+        id=_generate_id(),
+        room_id=room_id,
+        sender_id="system",
+        sender_name="System",
+        content=f"🏠 房间 '{room.name}' 创建成功！房主可以添加智能体。",
+        type=MessageType.SYSTEM,
+        timestamp=datetime.now().isoformat()
+    ))
+    
+    _save_data()
+    return JSONResponse(room.dict())
+
+@router.get("/rooms/{room_id}")
+async def get_room(room_id: str):
+    """Get room details"""
+    if room_id not in _rooms:
+        raise HTTPException(status_code=404, detail="Room not found")
+    return JSONResponse(_rooms[room_id].dict())
+
+@router.post("/rooms/{room_id}/agents/add")
+async def add_agent(room_id: str, request: Request):
+    """Add agent to room - ONLY CREATOR CAN DO THIS"""
+    if room_id not in _rooms:
+        raise HTTPException(status_code=404, detail="Room not found")
+    
+    body = await request.json()
+    user_id = body.get("user_id")
+    agent_data = body.get("agent", {})
+    
+    room = _rooms[room_id]
+    
+    # STRICT PERMISSION CHECK
+    if user_id != room.creator_id:
+        raise HTTPException(status_code=403, detail="Only room creator can add agents")
+    
+    # Check if already exists
+    if any(a.id == agent_data.get("id") for a in room.agents):
+        return JSONResponse({"success": False, "error": "Agent already in room"})
+    
+    agent = AgentConfig(
+        id=agent_data.get("id"),
+        name=agent_data.get("name", "Agent"),
+        icon=agent_data.get("icon", "🤖"),
+        color=agent_data.get("color", "#07C160"),
+        description=agent_data.get("description", ""),
+        personality=agent_data.get("personality", "helpful"),
+        added_by=user_id,
+        added_at=datetime.now().isoformat()
+    )
+    
+    room.agents.append(agent)
+    room.updated_at = datetime.now().isoformat()
+    
+    # System message
+    _messages[room_id].append(Message(
+        id=_generate_id(),
+        room_id=room_id,
+        sender_id="system",
+        sender_name="System",
+        content=f"🤖 {agent.name} 加入了群聊",
+        type=MessageType.SYSTEM,
+        timestamp=datetime.now().isoformat()
+    ))
+    
+    await manager.broadcast_to_room(room_id, {
+        "type": "room_update",
+        "room_id": room_id,
+        "agents": [a.dict() for a in room.agents]
+    })
+    
+    _save_data()
+    return JSONResponse({"success": True, "agent": agent.dict()})
+
+@router.post("/rooms/{room_id}/agents/remove")
+async def remove_agent(room_id: str, request: Request):
+    """Remove agent from room - ONLY CREATOR CAN DO THIS"""
+    if room_id not in _rooms:
+        raise HTTPException(status_code=404, detail="Room not found")
+    
+    body = await request.json()
+    user_id = body.get("user_id")
+    agent_id = body.get("agent_id")
+    
+    room = _rooms[room_id]
+    
+    # STRICT PERMISSION CHECK
+    if user_id != room.creator_id:
+        raise HTTPException(status_code=403, detail="Only room creator can remove agents")
+    
+    removed = None
+    for i, a in enumerate(room.agents):
+        if a.id == agent_id:
+            removed = a
+            room.agents.pop(i)
+            break
+    
+    if removed:
+        room.updated_at = datetime.now().isoformat()
+        _messages[room_id].append(Message(
+            id=_generate_id(),
+            room_id=room_id,
+            sender_id="system",
+            sender_name="System",
+            content=f"🤖 {removed.name} 离开了群聊",
+            type=MessageType.SYSTEM,
+            timestamp=datetime.now().isoformat()
+        ))
+        
+        await manager.broadcast_to_room(room_id, {
+            "type": "room_update",
+            "room_id": room_id,
+            "agents": [a.dict() for a in room.agents]
+        })
+        _save_data()
+    
+    return JSONResponse({"success": True})
+
+@router.get("/rooms/{room_id}/messages")
+async def get_messages(room_id: str, limit: int = 50):
+    """Get room messages"""
+    if room_id not in _messages:
+        return JSONResponse({"messages": []})
+    msgs = _messages[room_id][-limit:]
+    return JSONResponse({"messages": [m.dict() for m in msgs]})
+
+@router.post("/rooms/{room_id}/messages")
+async def send_message(room_id: str, request: Request):
+    """Send message and trigger agent replies with shared context"""
+    if room_id not in _rooms:
+        raise HTTPException(status_code=404, detail="Room not found")
+    
+    body = await request.json()
+    
+    msg = Message(
+        id=_generate_id(),
+        room_id=room_id,
+        sender_id=body.get("user_id", "anonymous"),
+        sender_name=body.get("nickname", "Anonymous"),
+        content=body.get("content", ""),
+        type=MessageType(body.get("type", "text")),
+        mentions=body.get("mentions", []),
+        timestamp=datetime.now().isoformat()
+    )
+    
+    if room_id not in _messages:
+        _messages[room_id] = []
+    
+    _messages[room_id].append(msg)
+    
+    # Broadcast user message
+    await manager.broadcast_to_room(room_id, {
+        "type": "new_message",
+        "room_id": room_id,
+        "message": msg.dict()
+    })
+    
+    # Trigger agent replies with shared context
+    asyncio.create_task(_handle_group_chat(room_id, msg))
+    
+    _save_data()
+    return JSONResponse(msg.dict())
+
+async def _handle_group_chat(room_id: str, user_msg: Message):
+    """Handle true group chat - all agents share context"""
+    await asyncio.sleep(0.3)
+    
+    if room_id not in _rooms:
+        return
+    
+    room = _rooms[room_id]
+    active_agents = [a for a in room.agents if a.is_active and a.auto_reply]
+    if not active_agents:
+        return
+    
+    mentions = user_msg.mentions or []
+    all_messages = _messages.get(room_id, [])
+    
+    # Determine which agents reply
+    replying_agents = []
+    if mentions:
+        # Only mentioned agents reply
+        for agent in active_agents:
+            if agent.id in mentions or agent.name in mentions:
+                replying_agents.append(agent)
+    else:
+        # All agents participate (they all see the same context)
+        replying_agents = active_agents
+    
+    # Each agent replies with shared context
+    for agent in replying_agents:
+        try:
+            # Typing indicator
+            await manager.broadcast_to_room(room_id, {
+                "type": "agent_typing",
+                "agent_name": agent.name,
+                "typing": True
+            })
+            
+            # Call agent with full shared context
+            response = await call_agent_with_context(
+                agent.id, agent.name, agent.personality,
+                room_id, user_msg, all_messages
+            )
+            
+            # Stop typing
+            await manager.broadcast_to_room(room_id, {
+                "type": "agent_typing",
+                "agent_name": agent.name,
+                "typing": False
+            })
+            
+            # Send agent message
+            agent_msg = Message(
+                id=_generate_id(),
+                room_id=room_id,
+                sender_id=agent.id,
+                sender_name=agent.name,
+                content=response,
+                type=MessageType.TEXT,
+                timestamp=datetime.now().isoformat()
+            )
+            
+            _messages[room_id].append(agent_msg)
+            
+            await manager.broadcast_to_room(room_id, {
+                "type": "new_message",
+                "room_id": room_id,
+                "message": agent_msg.dict()
+            })
+            
+            # Small delay between agents for natural feel
+            await asyncio.sleep(0.5)
+            
+        except Exception as e:
+            logger.error(f"[P] Agent {agent.name} failed: {e}")
+
+@router.websocket("/ws/{client_id}")
+async def websocket_endpoint(websocket: WebSocket, client_id: str):
+    await manager.connect(websocket, client_id)
+    try:
+        while True:
+            data = await websocket.receive_json()
+            if data.get("type") == "join":
+                room_id = data.get("room_id")
+                if room_id:
+                    manager.subscribe(client_id, room_id)
+    except WebSocketDisconnect:
+        manager.disconnect(client_id)
+
+@router.post("/files/upload")
+async def upload_file(file: UploadFile = File(...), room_id: str = Form(...), 
+                      user_id: str = Form(...), nickname: str = Form(...)):
+    """Upload file"""
+    file_id = _generate_id()
+    file_path = FILES_DIR / file_id
+    
+    content = await file.read()
+    with open(file_path, "wb") as f:
+        f.write(content)
+    
+    file_info = FileInfo(
+        id=file_id, room_id=room_id, sender_id=user_id, sender_name=nickname,
+        file_name=file.filename, file_size=len(content),
+        mime_type=file.content_type or "application/octet-stream",
+        created_at=datetime.now().isoformat()
+    )
+    _files[file_id] = file_info
+    
+    msg = Message(
+        id=_generate_id(), room_id=room_id, sender_id=user_id, sender_name=nickname,
+        content=f"📎 {file.filename}", type=MessageType.FILE,
+        file_id=file_id, file_name=file.filename, file_size=len(content),
+        timestamp=datetime.now().isoformat()
+    )
+    
+    if room_id not in _messages:
+        _messages[room_id] = []
+    _messages[room_id].append(msg)
+    
+    await manager.broadcast_to_room(room_id, {
+        "type": "new_message", "room_id": room_id, "message": msg.dict()
+    })
+    
+    _save_data()
+    return JSONResponse({"success": True, "file_id": file_id})
+
+@router.get("/files/{file_id}/download")
+async def download_file(file_id: str):
+    """Download file"""
+    if file_id not in _files:
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    file_info = _files[file_id]
+    file_path = FILES_DIR / file_id
+    
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    return FileResponse(
+        path=str(file_path),
+        filename=file_info.file_name,
+        media_type=file_info.mime_type
+    )
+
+@router.get("/files/{file_id}/preview")
+async def preview_file(file_id: str):
+    """Preview file (for images)"""
+    if file_id not in _files:
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    file_info = _files[file_id]
+    file_path = FILES_DIR / file_id
+    
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    # For images, return directly for preview
+    if file_info.mime_type and file_info.mime_type.startswith('image/'):
+        return FileResponse(
+            path=str(file_path),
+            media_type=file_info.mime_type
+        )
+    
+    # For other files, redirect to download
+    raise HTTPException(status_code=400, detail="File is not previewable")
+
+# ============ Image Upload ============
+@router.post("/images/upload")
+async def upload_image(file: UploadFile = File(...), room_id: str = Form(...),
+                       user_id: str = Form(...), nickname: str = Form(...)):
+    """Upload image"""
+    # Validate image
+    if not file.content_type or not file.content_type.startswith('image/'):
+        raise HTTPException(status_code=400, detail="File must be an image")
+    
+    file_id = _generate_id()
+    file_path = FILES_DIR / file_id
+    
+    content = await file.read()
+    
+    # Limit image size to 10MB
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Image too large (max 10MB)")
+    
+    with open(file_path, "wb") as f:
+        f.write(content)
+    
+    file_info = FileInfo(
+        id=file_id, room_id=room_id, sender_id=user_id, sender_name=nickname,
+        file_name=file.filename, file_size=len(content),
+        mime_type=file.content_type,
+        created_at=datetime.now().isoformat()
+    )
+    _files[file_id] = file_info
+    
+    msg = Message(
+        id=_generate_id(), room_id=room_id, sender_id=user_id, sender_name=nickname,
+        content=f"🖼️ {file.filename}", type=MessageType.IMAGE,
+        file_id=file_id, file_name=file.filename, file_size=len(content),
+        timestamp=datetime.now().isoformat()
+    )
+    
+    if room_id not in _messages:
+        _messages[room_id] = []
+    _messages[room_id].append(msg)
+    
+    await manager.broadcast_to_room(room_id, {
+        "type": "new_message", "room_id": room_id, "message": msg.dict()
+    })
+    
+    _save_data()
+    return JSONResponse({
+        "success": True,
+        "file_id": file_id,
+        "preview_url": f"/api/plugins/p_plugin/files/{file_id}/preview"
+    })
+
+# ============ Voice Message ============
+@router.post("/voice/upload")
+async def upload_voice(file: UploadFile = File(...), room_id: str = Form(...),
+                       user_id: str = Form(...), nickname: str = Form(...),
+                       duration: int = Form(0)):
+    """Upload voice message"""
+    file_id = _generate_id()
+    file_path = FILES_DIR / file_id
+    
+    content = await file.read()
+    
+    # Limit voice to 5MB (about 5 minutes)
+    if len(content) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Voice message too large (max 5MB)")
+    
+    with open(file_path, "wb") as f:
+        f.write(content)
+    
+    file_info = FileInfo(
+        id=file_id, room_id=room_id, sender_id=user_id, sender_name=nickname,
+        file_name=f"voice_{duration}s.webm", file_size=len(content),
+        mime_type=file.content_type or "audio/webm",
+        created_at=datetime.now().isoformat()
+    )
+    _files[file_id] = file_info
+    
+    msg = Message(
+        id=_generate_id(), room_id=room_id, sender_id=user_id, sender_name=nickname,
+        content=f"🎙️ 语音消息 ({duration}秒)", type=MessageType.TEXT,
+        file_id=file_id, file_name=f"voice_{duration}s.webm", file_size=len(content),
+        timestamp=datetime.now().isoformat()
+    )
+    
+    if room_id not in _messages:
+        _messages[room_id] = []
+    _messages[room_id].append(msg)
+    
+    await manager.broadcast_to_room(room_id, {
+        "type": "new_message", "room_id": room_id, "message": msg.dict()
+    })
+    
+    _save_data()
+    return JSONResponse({
+        "success": True,
+        "file_id": file_id,
+        "duration": duration,
+        "play_url": f"/api/plugins/p_plugin/files/{file_id}/download"
+    })
+
+@router.get("/web/{room_id}")
+async def web_chat_page(room_id: str):
+    """Serve web chat page for sharing"""
+    web_file = PLUGIN_DIR / "web_chat.html"
+    if not web_file.exists():
+        raise HTTPException(status_code=404, detail="Web chat page not found")
+    return FileResponse(str(web_file))
+
+# ============ WeChat Integration ============
+@router.post("/wechat/join")
+async def wechat_join_room(request: Request):
+    """WeChat user join room and get link"""
+    body = await request.json()
+    room_id = body.get("room_id")
+    wx_user_id = body.get("wx_user_id", "wechat_" + str(uuid.uuid4())[:8])
+    wx_nickname = body.get("wx_nickname", "WeChat User")
+    
+    if not room_id or room_id not in _rooms:
+        raise HTTPException(status_code=404, detail="Room not found")
+    
+    room = _rooms[room_id]
+    
+    # Generate web chat URL for WeChat user
+    web_url = f"/plugins/p_plugin/web/{room_id}?user_id={wx_user_id}&nickname={wx_nickname}"
+    
+    # Add system message about WeChat user joining
+    join_msg = Message(
+        id=_generate_id(),
+        room_id=room_id,
+        sender_id="system",
+        sender_name="System",
+        content=f"📱 WeChat user [{wx_nickname}] joined the room via link",
+        type=MessageType.SYSTEM,
+        timestamp=datetime.now().isoformat()
+    )
+    if room_id not in _messages:
+        _messages[room_id] = []
+    _messages[room_id].append(join_msg)
+    
+    await manager.broadcast_to_room(room_id, {
+        "type": "new_message",
+        "room_id": room_id,
+        "message": join_msg.dict()
+    })
+    
+    return JSONResponse({
+        "success": True,
+        "room_id": room_id,
+        "room_name": room.name,
+        "web_url": web_url,
+        "agents_count": len(room.agents),
+        "message": f"Welcome to {room.name}! Click the link to join the chat."
+    })
+
+@router.post("/wechat/send")
+async def wechat_send_message(request: Request):
+    """Send message from WeChat to room"""
+    body = await request.json()
+    room_id = body.get("room_id")
+    wx_user_id = body.get("wx_user_id")
+    wx_nickname = body.get("wx_nickname", "WeChat User")
+    content = body.get("content", "")
+    
+    if not room_id or room_id not in _rooms:
+        raise HTTPException(status_code=404, detail="Room not found")
+    
+    if not content.strip():
+        raise HTTPException(status_code=400, detail="Message content is empty")
+    
+    # Create message
+    msg = Message(
+        id=_generate_id(),
+        room_id=room_id,
+        sender_id=wx_user_id,
+        sender_name=wx_nickname,
+        content=content,
+        type=MessageType.TEXT,
+        timestamp=datetime.now().isoformat()
+    )
+    
+    if room_id not in _messages:
+        _messages[room_id] = []
+    _messages[room_id].append(msg)
+    
+    # Broadcast to all connected clients
+    await manager.broadcast_to_room(room_id, {
+        "type": "new_message",
+        "room_id": room_id,
+        "message": msg.dict()
+    })
+    
+    # Trigger agent replies
+    asyncio.create_task(_handle_group_chat(room_id, msg))
+    
+    _save_data()
+    
+    return JSONResponse({
+        "success": True,
+        "message_id": msg.id,
+        "timestamp": msg.timestamp
+    })
+
+@router.get("/wechat/rooms")
+async def wechat_get_rooms():
+    """Get list of public rooms for WeChat users"""
+    public_rooms = [
+        {
+            "id": r.id,
+            "name": r.name,
+            "type": r.type,
+            "agents_count": len(r.agents),
+            "web_url": f"/plugins/p_plugin/web/{r.id}"
+        }
+        for r in _rooms.values()
+        if r.type in ["public", "official"]
+    ]
+    return JSONResponse({
+        "rooms": public_rooms,
+        "total": len(public_rooms)
+    })
+
+@router.get("/wechat/qrcode/{room_id}")
+async def wechat_get_room_qrcode(room_id: str):
+    """Generate QR code data for room sharing"""
+    if room_id not in _rooms:
+        raise HTTPException(status_code=404, detail="Room not found")
+    
+    room = _rooms[room_id]
+    
+    # Generate QR code content (URL)
+    qr_content = f"{QWENPAW_API_BASE}/plugins/p_plugin/web/{room_id}"
+    
+    return JSONResponse({
+        "room_id": room_id,
+        "room_name": room.name,
+        "qr_content": qr_content,
+        "short_link": f"/p/{room_id}",
+        "agents": [a.name for a in room.agents]
+    })
+
+# ============ Agent Tools (accessible from any channel: WeChat/DingTalk/Console) ============
+
+async def _tool_create_room(name: str, room_type: str = "public", creator_id: str = "", creator_name: str = "") -> dict:
+    """Create a new AI group chat room."""
+    rid = str(uuid.uuid4())[:16]
+    now = datetime.now().isoformat()
+    room = Room(
+        id=rid, name=name, type=room_type,
+        creator_id=creator_id, creator_nickname=creator_name,
+        agents=[], created_at=now, updated_at=now
+    )
+    _rooms[rid] = room
+    if rid not in _messages:
+        _messages[rid] = []
+    _add_system_msg(rid, f"🏠 房间 '{name}' 创建成功")
+    _save_data()
+    link = f"{QWENPAW_API_BASE}/api/plugins/p_plugin/web/{rid}"
+    return {"room_id": rid, "room_name": name, "share_link": link, "agent_count": 0}
+
+async def _tool_list_rooms() -> dict:
+    """List all AI group chat rooms."""
+    rooms = []
+    for r in _rooms.values():
+        rooms.append({
+            "room_id": r.id, "name": r.name, "type": r.type,
+            "agent_count": len(r.agents),
+            "share_link": f"{QWENPAW_API_BASE}/api/plugins/p_plugin/web/{r.id}"
+        })
+    return {"rooms": rooms, "total": len(rooms)}
+
+async def _tool_get_room_info(room_id: str) -> dict:
+    """Get room details."""
+    if room_id not in _rooms:
+        return {"error": f"Room '{room_id}' not found"}
+    r = _rooms[room_id]
+    return {
+        "room_id": r.id, "name": r.name, "type": r.type,
+        "agents": [{"id": a.id, "name": a.name, "icon": a.icon} for a in r.agents],
+        "share_link": f"{QWENPAW_API_BASE}/api/plugins/p_plugin/web/{r.id}"
+    }
+
+async def _tool_get_room_messages(room_id: str, limit: int = 20) -> dict:
+    """Get recent messages from a room."""
+    msgs = _messages.get(room_id, [])[-limit:]
+    return {"messages": [{"sender": m.sender_name, "content": m.content, "type": m.type} for m in msgs]}
+
+async def _tool_send_room_message(room_id: str, content: str, sender_name: str = "User") -> dict:
+    """Send a message to a room."""
+    if room_id not in _rooms:
+        return {"error": f"Room '{room_id}' not found"}
+    msg = Message(
+        id=str(uuid.uuid4())[:16], room_id=room_id, sender_id="agent",
+        sender_name=sender_name, content=content, type="text",
+        timestamp=datetime.now().isoformat()
+    )
+    if room_id not in _messages:
+        _messages[room_id] = []
+    _messages[room_id].append(msg)
+    _save_data()
+    return {"message_id": msg.id, "success": True}
+
+async def _tool_add_agent(room_id: str, agent_id: str, agent_name: str, agent_icon: str = "🤖") -> dict:
+    """Add an AI agent to a room."""
+    if room_id not in _rooms:
+        return {"error": f"Room '{room_id}' not found"}
+    room = _rooms[room_id]
+    if any(a.id == agent_id for a in room.agents):
+        return {"error": f"Agent '{agent_id}' already in room"}
+    agent = AgentConfig(
+        id=agent_id, name=agent_name, icon=agent_icon,
+        color="#07C160", added_at=datetime.now().isoformat()
+    )
+    room.agents.append(agent)
+    room.updated_at = datetime.now().isoformat()
+    _add_system_msg(room_id, f"🤖 {agent_name} 加入了群聊")
+    _save_data()
+    return {"success": True, "agent": agent.dict()}
+
+async def _tool_remove_agent(room_id: str, agent_id: str) -> dict:
+    """Remove an AI agent from a room."""
+    if room_id not in _rooms:
+        return {"error": f"Room '{room_id}' not found"}
+    room = _rooms[room_id]
+    for i, a in enumerate(room.agents):
+        if a.id == agent_id:
+            removed = room.agents.pop(i)
+            room.updated_at = datetime.now().isoformat()
+            _add_system_msg(room_id, f"🤖 {removed.name} 离开了群聊")
+            _save_data()
+            return {"success": True, "agent_name": removed.name}
+    return {"error": f"Agent '{agent_id}' not found in room"}
+
+# ============ Plugin Class ============
+class PPlugin:
+    def __init__(self):
+        self.name = "P"
+        self.version = CURRENT_VERSION
+        self.id = "p_plugin"
+        _load_data()
+        logger.info(f"[P] v{self.version} initialized")
+    
+    def register(self, api):
+        # HTTP routes for web UI
+        api.register_http_router(router, prefix="/plugins/p_plugin", tags=["p-plugin"])
+        
+        # Agent tools — accessible from any channel (WeChat/DingTalk/Feishu/Console)
+        api.register_tool(
+            tool_name="p_create_room",
+            tool_func=_tool_create_room,
+            description="Create a new AI group chat room. The room can have multiple AI agents. "
+                        "Returns room ID and share link. When a WeChat user wants to start "
+                        "an AI group chat, use this tool first.",
+            icon="🏠",
+        )
+        api.register_tool(
+            tool_name="p_list_rooms",
+            tool_func=_tool_list_rooms,
+            description="List all AI group chat rooms with their details (name, agent count, share link).",
+            icon="📋",
+        )
+        api.register_tool(
+            tool_name="p_get_room_info",
+            tool_func=_tool_get_room_info,
+            description="Get detailed information about a group chat room, including its agents and share link.",
+            icon="ℹ️",
+        )
+        api.register_tool(
+            tool_name="p_get_room_messages",
+            tool_func=_tool_get_room_messages,
+            description="Get recent messages from a group chat room.",
+            icon="📜",
+        )
+        api.register_tool(
+            tool_name="p_send_room_message",
+            tool_func=_tool_send_room_message,
+            description="Send a message to a group chat room. The room's AI agents will see this message. "
+                        "Use this when a user (via any channel) wants to send a message to an AI group chat.",
+            icon="💬",
+        )
+        api.register_tool(
+            tool_name="p_add_agent",
+            tool_func=_tool_add_agent,
+            description="Add an AI agent to a group chat room. The agent will participate in conversations. "
+                        "Use this when a user wants to add an AI assistant to their group chat.",
+            icon="🤖",
+        )
+        api.register_tool(
+            tool_name="p_remove_agent",
+            tool_func=_tool_remove_agent,
+            description="Remove an AI agent from a group chat room.",
+            icon="❌",
+        )
+        
+        # Register WeChat channel handler
+        self._register_wechat_handler(api)
+        
+        logger.info(f"[P] Agent tools registered: p_create_room, p_list_rooms, p_get_room_info, "
+                     f"p_get_room_messages, p_send_room_message, p_add_agent, p_remove_agent")
+        logger.info(f"[P] WeChat channel handler registered")
+    
+    def _register_wechat_handler(self, api):
+        """Register WeChat channel message handler."""
+        try:
+            # Check if channel API is available
+            if hasattr(api, 'register_channel_handler'):
+                api.register_channel_handler(
+                    channel="wechat",
+                    handler=self._handle_wechat_message,
+                    agent_name="P-Chat",
+                    agent_description="AI 群聊助手 - 创建房间、管理智能体、群聊对话",
+                    welcome_message="""👋 你好！我是 **P-Chat** 🤖
+
+我可以帮你创建 AI 群聊房间，与多个智能体一起实时聊天！
+
+**快速开始：**
+• 输入「**创建房间**」开始新的 AI 群聊
+• 输入「**房间列表**」查看所有房间
+• 直接发送消息即可参与群聊
+
+试试说「创建房间」开始吧！"""
+                )
+        except Exception as e:
+            logger.warning(f"[P] Could not register WeChat handler: {e}")
+    
+    async def _handle_wechat_message(self, message: dict) -> str:
+        """Handle incoming WeChat message."""
+        user_id = message.get("user_id", "")
+        nickname = message.get("nickname", "微信用户")
+        content = message.get("content", "").strip()
+        
+        # Command patterns
+        import re
+        
+        # Create room command
+        if re.match(r'^(创建房间|新建房间|开始群聊|create room)', content, re.I):
+            return await self._wechat_create_room(user_id, nickname)
+        
+        # List rooms command
+        if re.match(r'^(房间列表|查看房间|list rooms|rooms)', content, re.I):
+            return await self._wechat_list_rooms()
+        
+        # Join room command
+        match = re.match(r'^(加入房间|进入房间|join room)\s+(\w+)', content, re.I)
+        if match:
+            room_id = match.group(2)
+            return await self._wechat_join_room(user_id, room_id, nickname)
+        
+        # Help command
+        if re.match(r'^(帮助|help|菜单|menu|\?)', content, re.I):
+            return self._wechat_help()
+        
+        # Default: send to current room or auto-create
+        return await self._wechat_send_message(user_id, nickname, content)
+    
+    async def _wechat_create_room(self, user_id: str, nickname: str) -> str:
+        """Create room for WeChat user."""
+        result = await _tool_create_room(name=f"{nickname}的群聊", user_id=f"wechat_{user_id}", nickname=nickname)
+        
+        if "error" in result:
+            return f"❌ 创建失败: {result['error']}"
+        
+        room_id = result.get("room_id")
+        _wechat_user_rooms[user_id] = room_id
+        
+        # Get share link
+        info = await _tool_get_room_info(room_id=room_id)
+        share_link = info.get("share_link", "")
+        
+        return f"""✅ 房间创建成功！
+
+🏠 **{result.get('room_name')}**
+🆔 房间ID: `{room_id}`
+
+🔗 **分享链接**: {share_link}
+
+💬 现在直接发送消息，我会转发到群聊中！"""
+    
+    async def _wechat_list_rooms(self) -> str:
+        """List rooms for WeChat."""
+        result = await _tool_list_rooms()
+        rooms = result.get("rooms", [])
+        
+        if not rooms:
+            return "📭 暂无房间，输入「创建房间」开始吧！"
+        
+        msg = "📋 **房间列表**\n\n"
+        for i, room in enumerate(rooms[:5], 1):
+            msg += f"{i}. **{room.get('name')}**\n"
+            msg += f"   🆔 `{room.get('id')}` | 🤖 {room.get('agent_count', 0)} 个智能体\n\n"
+        
+        msg += "💡 输入「加入房间 xxx」加入指定房间"
+        return msg
+    
+    async def _wechat_join_room(self, user_id: str, room_id: str, nickname: str) -> str:
+        """Join room from WeChat."""
+        info = await _tool_get_room_info(room_id=room_id)
+        
+        if "error" in info:
+            return f"❌ 房间不存在: {room_id}"
+        
+        _wechat_user_rooms[user_id] = room_id
+        
+        agents = info.get("agents", [])
+        agent_names = [a.get("name") for a in agents]
+        
+        return f"""✅ 已加入房间: **{info.get('name')}**
+
+🤖 智能体: {', '.join(agent_names) or '暂无'}
+
+💬 直接发送消息即可参与群聊！"""
+    
+    async def _wechat_send_message(self, user_id: str, nickname: str, content: str) -> str:
+        """Send message from WeChat."""
+        room_id = _wechat_user_rooms.get(user_id)
+        
+        if not room_id:
+            # Auto-create room
+            return await self._wechat_create_room(user_id, nickname)
+        
+        # Send message
+        result = await _tool_send_room_message(
+            room_id=room_id,
+            user_id=f"wechat_{user_id}",
+            nickname=nickname,
+            content=content
+        )
+        
+        if "error" in result:
+            return f"❌ 发送失败: {result['error']}"
+        
+        # Wait for AI responses
+        await asyncio.sleep(1.5)
+        
+        # Get messages
+        msgs = await _tool_get_room_messages(room_id=room_id, limit=10)
+        
+        # Find AI responses (not from this user, after our message)
+        ai_responses = []
+        user_msg_id = result.get("message_id")
+        found_user = False
+        
+        for m in reversed(msgs.get("messages", [])):
+            if m.get("id") == user_msg_id:
+                found_user = True
+                continue
+            if found_user and m.get("sender_id") != f"wechat_{user_id}" and m.get("type") == "text":
+                ai_responses.append(f"🤖 **{m.get('sender_name')}**: {m.get('content')}")
+            if len(ai_responses) >= 3:
+                break
+        
+        if ai_responses:
+            return "\n\n".join(reversed(ai_responses))
+        else:
+            return "✅ 消息已发送，智能体正在思考中..."
+    
+    def _wechat_help(self) -> str:
+        """Get help message for WeChat."""
+        return """📖 **P-Chat 命令菜单**
+
+🏠 **房间管理**
+• `创建房间` - 创建新的 AI 群聊
+• `房间列表` - 查看所有房间
+• `加入房间 xxx` - 加入指定房间
+
+💬 **消息**
+• 直接输入文字 - 发送到当前房间
+
+💡 首次使用直接发送消息会自动创建房间！"""
+    
+    def get_router(self):
+        return router
+
+plugin = PPlugin()

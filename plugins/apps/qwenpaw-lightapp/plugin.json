@@ -1,0 +1,37 @@
+{
+  "id": "qwenpaw-lightapp",
+  "name": "轻应用管理器",
+  "version": "0.1.0",
+  "description": "QwenPaw 轻应用管理器：支持通过iframe显示用户配置的URL，可指定启动时窗口大小，数据以JSON方式保存在后端接口的磁盘上",
+  "author": "QwenPaw QA Agent",
+  "license": "Apache-2.0",
+  "type": "app",
+  "qwenpaw_version": {
+    "min": "2.0.0",
+    "max": "2.1.0"
+  },
+  "entry": {
+    "backend": "plugin.py",
+    "frontend": "ui/index.js"
+  },
+  "menu": {
+    "label": "轻应用",
+    "icon": "📱",
+    "description": "轻应用管理器",
+    "location": "primary.settings"
+  },
+  "permissions": [
+    "workspace.read",
+    "workspace.write"
+  ],
+  "meta": {
+    "category": "developer-tools",
+    "icon": "📱",
+    "pawapp": {
+      "icon": "📱",
+      "category": "developer-tools",
+      "entry_page": "/apps/qwenpaw-lightapp",
+      "launch_scope": "page"
+    }
+  }
+}

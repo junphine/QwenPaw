@@ -1,0 +1,25 @@
+{
+  "id": "qwenpaw-doubao",
+  "name": "双虾汇",
+  "version": "2.4.3",
+  "description": "AI辩论平台 - 双智能体辩论系统",
+  "author": "0+1+2≠3 Team 115886",
+  "type": "app",
+  "qwenpaw_version": {
+    "min": "2.0.0",
+    "max": "2.9.0"
+  },
+  "meta": {
+    "pawapp": {
+      "icon": "🦐",
+      "category": "productivity",
+      "entry_page": "/apps/qwenpaw-doubao",
+      "launch_scope": "page"
+    }
+  },
+  "entry": {
+    "backend": "plugin.py",
+    "frontend": "ui/index.js"
+  },
+  "dependencies": []
+}

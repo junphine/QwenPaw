@@ -1,0 +1,89 @@
+{
+  "id": "daydayup",
+  "name": "趣学习",
+  "version": "2.1.0",
+  "description": "AI学习陪伴助手 - 基于 Deep Tutor 架构的完整学习系统，融合 QwenPaw 环境",
+  "author": "0+1+2≠3 Team 115886",
+  "type": "frontend",
+  "qwenpaw_version": {
+    "min": "2.0.0",
+    "max": "2.9.0"
+  },
+  "entry": {
+    "backend": "plugin.py",
+    "frontend": "dist/index.js"
+  },
+  "dependencies": [
+    "fastapi>=0.109.0",
+    "pydantic>=2.5.0",
+    "python-multipart>=0.0.6",
+    "aiofiles>=23.0.0",
+    "httpx>=0.27.0",
+    "numpy>=1.24.0"
+  ],
+  "menu": {
+    "label": "趣学习",
+    "icon": "📚",
+    "description": "AI学习陪伴助手 - 完整学习系统",
+    "location": "sidebar"
+  },
+  "permissions": [
+    "agent.chat",
+    "workspace.write",
+    "storage",
+    "network",
+    "agent.tool"
+  ],
+  "meta": {
+    "category": "education",
+    "icon": "📚",
+    "pawapp": {
+      "icon": "📚",
+      "category": "education",
+      "entry_page": "/apps/daydayup",
+      "launch_scope": "page"
+    }
+  },
+  "settings_schema": {
+    "type": "object",
+    "properties": {
+      "default_language": {
+        "type": "string",
+        "title": "默认语言",
+        "enum": ["zh-CN", "en-US"],
+        "default": "zh-CN"
+      },
+      "theme": {
+        "type": "string",
+        "title": "主题",
+        "enum": ["light", "dark", "auto"],
+        "default": "auto"
+      },
+      "enable_memory": {
+        "type": "boolean",
+        "title": "启用记忆系统",
+        "default": true
+      },
+      "enable_partners": {
+        "type": "boolean",
+        "title": "启用学习伙伴",
+        "default": true
+      },
+      "enable_knowledge_base": {
+        "type": "boolean",
+        "title": "启用知识库",
+        "default": true
+      },
+      "auto_save_progress": {
+        "type": "boolean",
+        "title": "自动保存学习进度",
+        "default": true
+      },
+      "default_model": {
+        "type": "string",
+        "title": "默认AI模型",
+        "default": "default"
+      }
+    }
+  }
+}

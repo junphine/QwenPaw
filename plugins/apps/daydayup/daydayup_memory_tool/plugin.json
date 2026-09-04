@@ -1,0 +1,18 @@
+{
+  "id": "daydayup_memory_tool",
+  "name": "Daydayup Memory Tool",
+  "version": "1.0.0",
+  "type": "general",
+  "description": "Exposes Daydayup memory service functions as QwenPaw agent tools",
+  "author": "0+1+2≠3 Team 115886",
+  "entry": { "backend": "plugin.py" },
+  "dependencies": [],
+  "qwenpaw_version": { "min": "2.0.0", "max": "2.1.0" },
+  "meta": {
+    "tools": [
+      { "name": "save_memory", "description": "Save a memory to the Daydayup memory system", "icon": "💾", "requires_config": false },
+      { "name": "search_memories", "description": "Search memories in the Daydayup memory system", "icon": "🔍", "requires_config": false },
+      { "name": "get_memory_stats", "description": "Get statistics about the Daydayup memory system", "icon": "📊", "requires_config": false }
+    ]
+  }
+}

@@ -1507,7 +1507,7 @@ def run_hub_app(
     hub_config = HubConfigStore(
         root_dir / "control.db",
     ).resolve(config_path, available_provisioners={"local", "docker"})
-    if public_bind:
+    if public_bind and not force_public: # modify@byron
         database_path = root_dir / "control.db"
         credential_vault = TenantCredentialVault(
             database_path,
