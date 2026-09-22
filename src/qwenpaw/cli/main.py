@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
+import warnings
+warnings.filterwarnings("ignore", message=".*_UnionGenericAlias.*", category=DeprecationWarning)
 
 import logging
 from pathlib import Path

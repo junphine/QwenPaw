@@ -3422,7 +3422,7 @@ export default function ChatPage() {
     }) => {
       const { file, onSuccess, onError, onProgress } = options;
       try {
-        const projectSessionId = window.currentSessionId || chatIdRef.current || sessionApi.lastActiveChatId || 'new';
+        const projectSessionId = (window as any).currentSessionId || chatIdRef.current || sessionApi.lastActiveChatId || 'new';
         const appliedProjectDir = getPendingProjectDirectory(selectedAgent, projectSessionId);
 
         // Warn when model has no multimodal support

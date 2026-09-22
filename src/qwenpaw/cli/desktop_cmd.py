@@ -230,7 +230,7 @@ def desktop_cmd(
     # bind the same port.
     port_file = str(WORKING_DIR / "desktop_port")
     port, held_socket = get_stable_port(port_file, host)
-    url = f"http://{host}:{port}"
+    url = f"http://{host}:{port}/os"
     click.echo(f"Starting QwenPaw app on {url} (port {port})")
     logger.info("Server subprocess starting...")
 

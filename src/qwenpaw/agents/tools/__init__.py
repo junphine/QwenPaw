@@ -69,7 +69,7 @@ from .ast_tool import ast_search  # noqa: E402
 from .run_tool_batch import run_tool_batch  # noqa: E402
 from .mail_f1_tool import activate_f1_exploration_mode  # noqa: E402
 
-_BETA_NOTICE_LOGGED = False
+_BETA_NOTICE_LOGGED = True
 
 
 def _announce_experimental_browser() -> None:
