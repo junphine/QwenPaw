@@ -47,6 +47,7 @@ from ..loop.gates import StopAction, StopHandlerResult
 from ..providers.error_utils import extract_status_code
 from ..providers.fallback_chat_model import install_fallback_notice_sink
 from ..providers.model_capability_cache import get_capability_cache
+from ..providers.adapters.request_context import model_session
 from ..utils.tool_call_extra import (
     collect_transient_tool_call_extras,
     persist_tool_call_extras,
@@ -187,6 +188,7 @@ class QwenPawAgent(CodingModeMixin, Agent):
         """
         self._agent_config = agent_config
         self._request_context = dict(request_context or {})
+        self._model_session_id = uuid.uuid4().hex
         self._workspace_dir = workspace_dir
         self._language = agent_config.language
         # Optional context-management strategy. When None, the agent keeps its
@@ -610,10 +612,20 @@ class QwenPawAgent(CodingModeMixin, Agent):
 
     @staticmethod
     def _is_audio_fallback_error(exc: Exception) -> bool:
-        """Return whether DashScope rejected the current audio payload."""
+        """Return whether a provider rejected the current audio payload."""
         error_str = " ".join(str(exc).lower().split())
         status = extract_status_code(exc)
         has_bad_request_status = status == 400 or "<400>" in error_str
+        rejects_unknown_audio_part = "input_audio" in error_str and any(
+            marker in error_str
+            for marker in (
+                "unknown variant",
+                "unknown field",
+                "unknown part",
+                "unexpected variant",
+                "unexpected field",
+            )
+        )
         invalid_modal = all(
             marker in error_str
             for marker in (
@@ -624,7 +636,7 @@ class QwenPawAgent(CodingModeMixin, Agent):
                 "wrong position",
             )
         )
-        return (
+        return rejects_unknown_audio_part or (
             has_bad_request_status
             and "internalerror.algo.invalidparameter" in error_str
             and invalid_modal
@@ -883,13 +895,9 @@ class QwenPawAgent(CodingModeMixin, Agent):
             )
             return
 
-        # ── Proactive media stripping ──
-        from .model_factory import _supports_multimodal_for_current_model
-
-        should_strip_media = (
-            not _supports_multimodal_for_current_model()
-            or self._model_rejects_media()
-        )
+        # ModelInfo controls per-model request normalization. Only learned
+        # rejections belong here; a global lookup can misclassify fallbacks.
+        should_strip_media = self._model_rejects_media()
         should_strip_audio = (
             not should_strip_media and self._model_rejects_audio()
         )
@@ -1209,8 +1217,26 @@ class QwenPawAgent(CodingModeMixin, Agent):
     async def _reply(self, **kwargs: Any) -> Any:
         """Override kept as extension point; hint injection moved to
         ``_reasoning`` so each ReAct iteration picks up new hints."""
-        async for evt in super()._reply(**kwargs):
-            yield evt
+        stream = super()._reply(**kwargs)
+        try:
+            while True:
+                # Heartbeat consumers may resume each event in a new task.
+                # Never carry a ContextVar token across an outward yield.
+                with model_session(
+                    self._request_context,
+                    self._model_session_id,
+                ):
+                    try:
+                        evt = await anext(stream)
+                    except StopAsyncIteration:
+                        return
+                yield evt
+        finally:
+            with model_session(
+                self._request_context,
+                self._model_session_id,
+            ):
+                await stream.aclose()
 
     def _register_tool_call_hooks(self) -> None:
         """Register per-tool default timeouts on the ToolCoordinator."""

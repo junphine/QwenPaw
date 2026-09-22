@@ -16,6 +16,7 @@ import sessionApi from "./sessionApi";
 import { stopBackgroundQueue } from "./backgroundQueueRegistry";
 import { chatExtensions } from "@/plugins/registry/chatExtensions";
 import { useSessionFilesDrawer } from "@/stores/filesSurfaceStore";
+import { useStoppedTurnsStore } from "./stoppedTurns";
 
 // ---------------------------------------------------------------------------
 // Hoisted mocks
@@ -148,6 +149,13 @@ vi.mock(
   }),
 );
 
+vi.mock("../../features/session-settings/sessionModel", () => ({
+  loadSessionModel: (...args: unknown[]) => mockGetActiveModels(...args),
+  readPendingModel: () => null,
+  migratePendingModel: vi.fn(),
+  withPendingModel: (body: unknown) => body,
+}));
+
 vi.mock("@/api/modules/provider", () => ({
   providerApi: {
     listProviders: mockListProviders,
@@ -224,6 +232,8 @@ vi.mock("./sessionApi", () => ({
     getBackendSessionId: vi.fn(() => "backend-session-1"),
     setLastUserMessage: vi.fn(),
     discardLastUserMessage: vi.fn(),
+    setVisibleSession: vi.fn(),
+    getSession: vi.fn(async (id: string) => ({ id, messages: [] })),
     lastActiveChatId: "last-chat-1",
     patchLastUserMessage: vi.fn(),
     getSessionIdentity: vi.fn(() => ({
@@ -373,7 +383,11 @@ vi.mock("@/plugins/registry/useChatExtensions", () => ({
 }));
 
 vi.mock("./components/ContextUsageIndicator", () => ({
-  default: () => <div data-testid="context-usage" />,
+  default: ({ onCompact }: { onCompact: () => void }) => (
+    <div data-testid="context-usage">
+      <button data-testid="context-usage-compact" onClick={onCompact} />
+    </div>
+  ),
 }));
 
 vi.mock("../../components/ApprovalCard/ApprovalCard", () => ({
@@ -569,6 +583,7 @@ describe("ChatPage coverage", () => {
       currentSendingId: null,
       lastMigratedTo: null,
     });
+    useStoppedTurnsStore.setState({ stoppedSessionIds: new Set() });
     mockBeginLoopModeSubmission.mockReset();
     mockBeginLoopModeSubmission.mockImplementation((text: string) => text);
     mockRequiresQwenPawModel.mockReset();
@@ -724,7 +739,7 @@ describe("ChatPage coverage", () => {
     });
     await screen.findByTestId("chat-ui");
     await act(async () => {});
-    expect(screen.getByTestId("model-selector")).toBeInTheDocument();
+    expect(screen.queryByTestId("model-selector")).not.toBeInTheDocument();
     expect(screen.getByTestId("action-group")).toBeInTheDocument();
     expect(screen.getByTestId("header-title")).toBeInTheDocument();
   });
@@ -1109,6 +1124,34 @@ describe("ChatPage coverage", () => {
     }
   });
 
+  it("marks the canceled session after switching to another session", async () => {
+    const { chatApi } = await import("@/api/modules/chat");
+    vi.mocked(sessionApi.getRealIdForSession).mockImplementation((id) =>
+      id === "chat-A" ? "chat-A" : null,
+    );
+    vi.mocked(sessionApi.getBackendSessionId).mockImplementation((id) =>
+      id === "chat-A" || id === "runtime-A" ? "runtime-A" : "runtime-B",
+    );
+
+    renderWithProviders(<ChatPage />, {
+      initialEntries: ["/chat/chat-B"],
+    });
+    await screen.findByTestId("chat-ui");
+    sessionApi.lastActiveChatId = "chat-B";
+
+    await act(async () => {
+      await capturedOptions.api.cancel({
+        session_id: "runtime-A",
+        chatSessionId: "chat-A",
+      });
+    });
+
+    expect(chatApi.stopChat).toHaveBeenCalledWith("chat-A", "default");
+    expect(useStoppedTurnsStore.getState().stoppedSessionIds).toEqual(
+      new Set(["runtime-A"]),
+    );
+  });
+
   // ── reconnect callback → calls fetch ───────────────────────────────────
   it("reconnect callback invokes fetch with reconnect body", async () => {
     const chatId = "90000000-0000-4000-8000-000000000002";
@@ -1199,11 +1242,10 @@ describe("ChatPage coverage", () => {
     const actionsList = capturedOptions?.actions?.list;
     if (actionsList && actionsList.length > 1 && actionsList[1].render) {
       const element = actionsList[1].render({
-        data: {
-          data: { created_at: 1700000000000, completed_at: 1700000001000 },
-        },
+        data: { created_at: 1700000000000, completed_at: 1700000001000 },
       });
       expect(element).toBeTruthy();
+      expect(element.props.children).not.toBe("");
     }
   });
 
@@ -1246,6 +1288,27 @@ describe("ChatPage coverage", () => {
   });
 
   // ── handleBeforeSubmit: SDK query override ─────────────────────────────
+  it("compact command uses execution.execute with current session identity", async () => {
+    renderWithProviders(<ChatPage />, {
+      initialEntries: ["/chat/test-session"],
+    });
+    await screen.findByTestId("chat-ui");
+    await act(async () => {});
+
+    fireEvent.click(screen.getByTestId("context-usage-compact"));
+
+    expect(mockRuntimeSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        query: "/compact",
+        session_id: "test-session",
+        user_id: "test-user",
+        channel: "console",
+        agent_id: "default",
+      }),
+      { sessionId: "test-session", source: "direct" },
+    );
+  });
+
   it("returns the prepared query after the SDK captures input data", async () => {
     mockBeginLoopModeSubmission.mockImplementation(
       (text: string) => `/goal ${text}`,
@@ -2022,6 +2085,7 @@ describe("ChatPage coverage", () => {
 
     expect(capturedOptions?.actions?.replace).toBe(false);
     expect(capturedOptions?.actions?.right).toBe(false);
+    expect(capturedOptions?.actions?.list).toHaveLength(2);
   });
 
   // ── customToolRenderConfig ─────────────────────────────────────────────
@@ -2155,7 +2219,7 @@ describe("ChatPage coverage", () => {
   });
 
   // ── model-switched event with maxInputLength ───────────────────────────
-  it("model-switched event with maxInputLength patches context", async () => {
+  it("model-switched refreshes capabilities for the session model", async () => {
     renderWithProviders(<ChatPage />, {
       initialEntries: ["/chat/test-session"],
     });
@@ -2171,7 +2235,7 @@ describe("ChatPage coverage", () => {
       );
     });
 
-    // Should trigger both fetchMultimodalCaps and patchContextMaxInputLength
+    // Capability refresh uses the session model, without rewriting history.
     await waitFor(() => {
       expect(mockGetActiveModels).toHaveBeenCalled();
     });
