@@ -212,7 +212,7 @@ class LocalProcessRuntimeProvisioner(RuntimeProvisioner):
             # The process remains owned by this provisioner until stop or
             # close.
             process = self._launcher.submit(launch_process).result()
-        except Exception:
+        except Exception as e:
             if tunnel is not None:
                 tunnel.close()
             log_handle.close()

@@ -8,7 +8,7 @@ import os
 import shutil
 import socket
 import subprocess
-import sys
+import sys,site
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
@@ -115,9 +115,10 @@ def _read_roots() -> list[Path]:
         Path("/etc/resolv.conf"),
         Path("/etc/ssl/certs").resolve(),
         Path("/etc/pki/tls/certs").resolve(),
-        Path(sys.base_prefix).resolve().parent, # modify@byron
+        Path(sys.base_prefix).resolve(),
         Path(sys.executable).resolve(),
         Path(sys.prefix).resolve(),
+        Path(site.getusersitepackages()).resolve().parent,# add@byron
         source_root,
     }
     roots.update(Path(path).resolve() for path in mimetypes.knownfiles)
