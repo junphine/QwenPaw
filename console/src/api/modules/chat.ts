@@ -18,6 +18,10 @@ export interface ChatUploadResponse {
   stored_name?: string;
 }
 
+export interface ChatStatusResponse {
+  status: "idle" | "running";
+}
+
 const FILES_PREVIEW = "/files/preview";
 
 export const chatApi = {
@@ -62,6 +66,7 @@ export const chatApi = {
     channel?: string;
     archived?: boolean;
     include_app_owned?: boolean;
+    agentId?: string;
   }) => {
     const searchParams = new URLSearchParams();
     if (params?.user_id) searchParams.append("user_id", params.user_id);
@@ -74,7 +79,12 @@ export const chatApi = {
         String(params.include_app_owned),
       );
     const query = searchParams.toString();
-    return request<ChatSpec[]>(`/chats${query ? `?${query}` : ""}`);
+    const path = `/chats${query ? `?${query}` : ""}`;
+    return params?.agentId
+      ? request<ChatSpec[]>(path, {
+          headers: { "X-Agent-Id": params.agentId },
+        })
+      : request<ChatSpec[]>(path);
   },
 
   createChat: (chat: Partial<ChatSpec>) =>
@@ -98,6 +108,21 @@ export const chatApi = {
       `/chats/${encodeURIComponent(chatId)}${query ? `?${query}` : ""}`,
       {
         signal: options?.signal,
+      },
+    );
+  },
+
+  getChatStatus: (
+    chatId: string,
+    options?: { signal?: AbortSignal; agentId?: string },
+  ) => {
+    return request<ChatStatusResponse>(
+      `/chats/${encodeURIComponent(chatId)}/status`,
+      {
+        signal: options?.signal,
+        headers: options?.agentId
+          ? { "X-Agent-Id": options.agentId }
+          : undefined,
       },
     );
   },
@@ -170,9 +195,10 @@ export const chatApi = {
       { method: "DELETE" },
     ),
 
-  stopChat: (chatId: string) =>
+  stopChat: (chatId: string, agentId?: string) =>
     request<void>(`/console/chat/stop?chat_id=${encodeURIComponent(chatId)}`, {
       method: "POST",
+      ...(agentId ? { headers: { "X-Agent-Id": agentId } } : {}),
     }),
 };
 

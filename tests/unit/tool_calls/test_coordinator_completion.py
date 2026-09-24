@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator
 
@@ -317,6 +318,7 @@ async def test_middleware_caller_observes_coordinator_response():
                 "session_id": "session-1",
                 "agent_id": "agent-1",
                 "root_session_id": "root-1",
+                "root_agent_id": "parent-agent",
             },
         },
     )()
@@ -336,6 +338,9 @@ async def test_middleware_caller_observes_coordinator_response():
     )
 
     assert _tool_response_text_bytes(events[-1]) == 2000
+    entry = coordinator.get(tool_call.id)
+    assert entry is not None
+    assert entry.ctx.root_agent_id == "parent-agent"
 
 
 @pytest.mark.asyncio
@@ -1137,6 +1142,102 @@ async def test_force_cancel_sets_cancel_event_before_task_cancel():
 
 
 @pytest.mark.asyncio
+async def test_cancel_running_for_session_is_scoped_and_skips_offloaded():
+    """Chat Stop cancels only foreground tools in its session tree."""
+    coordinator = ToolCoordinator(
+        default_timeout_secs=30.0,
+        offload_on_deadline=False,
+    )
+    release = asyncio.Event()
+
+    async def next_handler(
+        tool_call: _ToolCall,
+    ) -> AsyncGenerator[Any, None]:
+        await release.wait()
+        yield _text_response(tool_call.id, "done")
+
+    async def start(
+        call_id: str,
+        session_id: str,
+        root_session_id: str,
+        *,
+        agent_id: str = "agent-1",
+        root_agent_id: str = "",
+    ) -> asyncio.Task[list[Any]]:
+        task = asyncio.create_task(
+            _collect(
+                coordinator.execute(
+                    tool_call=_ToolCall(id=call_id),
+                    next_handler=next_handler,
+                    session_id=session_id,
+                    agent_id=agent_id,
+                    root_session_id=root_session_id,
+                    root_agent_id=root_agent_id,
+                ),
+            ),
+        )
+        while coordinator.get(call_id) is None:
+            await asyncio.sleep(0)
+        return task
+
+    direct = await start("call-direct", "session-a", "session-a")
+    child = await start(
+        "call-child",
+        "session-a-child",
+        "session-a",
+        agent_id="child-agent",
+        root_agent_id="agent-1",
+    )
+    other = await start("call-other", "session-b", "session-b")
+    same_session = await start(
+        "call-same-session",
+        "session-a",
+        "session-a",
+        agent_id="other-agent",
+    )
+    other_child = await start(
+        "call-other-child",
+        "session-a-child",
+        "session-a",
+        agent_id="child-agent",
+        root_agent_id="other-agent",
+    )
+    offloaded = await start("call-offloaded", "session-a", "session-a")
+    assert await coordinator.request_offload("call-offloaded") is True
+    await asyncio.wait_for(offloaded, timeout=2)
+
+    count = await coordinator.cancel_running_for_session(
+        "session-a",
+        agent_id="agent-1",
+    )
+    assert count == 2
+    await asyncio.wait_for(asyncio.gather(direct, child), timeout=2)
+
+    direct_entry = coordinator.get("call-direct")
+    child_entry = coordinator.get("call-child")
+    other_entry = coordinator.get("call-other")
+    offloaded_entry = coordinator.get("call-offloaded")
+    assert direct_entry is not None and direct_entry.force_cancelled is True
+    assert child_entry is not None and child_entry.force_cancelled is True
+    assert other_entry is not None and other_entry.force_cancelled is False
+    assert (
+        offloaded_entry is not None
+        and offloaded_entry.force_cancelled is False
+    )
+    for call_id in ("call-same-session", "call-other-child"):
+        entry = coordinator.get(call_id)
+        assert entry is not None and entry.force_cancelled is False
+
+    release.set()
+    await asyncio.wait_for(
+        asyncio.gather(other, same_session, other_child),
+        timeout=2,
+    )
+    assert offloaded_entry.background_task is not None
+    await asyncio.wait_for(offloaded_entry.background_task, timeout=2)
+
+
+@pytest.mark.asyncio
 async def test_equal_timeout_budget_offloads_before_kill():
     """Default equal offload/kill budgets must still auto-offload.
 
@@ -1475,3 +1576,57 @@ async def test_request_offload_rejects_short_kill_without_bound():
         force=True,
     )
     await asyncio.wait_for(task, timeout=2)
+
+
+@pytest.fixture()
+def _coordinator_caplog(caplog: pytest.LogCaptureFixture):
+    """Capture logs from qwenpaw.tool_calls._coordinator."""
+    target = logging.getLogger("qwenpaw")
+    old_propagate = target.propagate
+    target.propagate = True
+    with caplog.at_level(
+        logging.ERROR,
+        logger="qwenpaw.tool_calls._coordinator",
+    ):
+        yield
+    target.propagate = old_propagate
+
+
+@pytest.mark.asyncio
+async def test_drain_logs_handler_exception(_coordinator_caplog, caplog):
+    """Exceptions in next_handler must be logged with traceback."""
+    coordinator = ToolCoordinator()
+    tool_call = _ToolCall(id="call-drain-err", name="boom_tool")
+
+    should_fail = True
+
+    async def next_handler(
+        tool_call: _ToolCall,
+    ) -> AsyncGenerator[Any, None]:
+        if should_fail:
+            raise RuntimeError("handler exploded")
+        yield _text_response(tool_call.id, "unreachable")
+
+    events = await _collect(
+        coordinator.execute(
+            tool_call=tool_call,
+            next_handler=next_handler,
+            session_id="session-drain-err",
+            agent_id="agent-1",
+            root_session_id="root-1",
+        ),
+    )
+
+    assert len(events) == 1
+    response = events[0]
+    assert response.state == ToolResultState.ERROR
+    assert "Tool error: handler exploded" in response.content[0].text
+
+    error_records = [
+        record
+        for record in caplog.records
+        if record.levelno == logging.ERROR
+        and "Tool handler failed" in record.getMessage()
+    ]
+    assert len(error_records) == 1
+    assert "RuntimeError: handler exploded" in caplog.text
