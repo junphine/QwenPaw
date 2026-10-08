@@ -1,22 +1,24 @@
+import { SharedModal } from "@/components/interaction/SharedModal";
 import { Switch } from "antd";
 import { useState, useEffect, useMemo, useRef } from "react";
 import type { KeyboardEvent, ReactNode, UIEvent } from "react";
 import {
+  Modal,
   Form,
   Input,
-  Modal,
   Button,
   Select,
   Radio,
 } from "@agentscope-ai/design";
 import { useAppMessage } from "../../../../../hooks/useAppMessage";
 import {
-  ApiOutlined,
-  CloseOutlined,
-  DownOutlined,
-  RightOutlined,
-} from "@ant-design/icons";
+  Plug as ApiOutlined,
+  X as CloseOutlined,
+  ChevronDown as DownOutlined,
+  ChevronRight as RightOutlined,
+} from "lucide-react";
 import type {
+  ActiveModelsInfo,
   BaseUrlOption,
   ProviderConfigRequest,
 } from "../../../../../api/types";
@@ -51,7 +53,7 @@ interface JsonCodeEditorProps {
 function highlightJson(text: string): ReactNode[] {
   const tokens: ReactNode[] = [];
   const pattern =
-    /("(?:\\.|[^"\\])*")(\s*:)?|\btrue\b|\bfalse\b|\bnull\b|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|[{}\[\],:]/g;
+    /("(?:\\.|[^"\\])*")(\s*:)?|\btrue\b|\bfalse\b|\bnull\b|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|[{}[\],:]/g;
 
   let lastIndex = 0;
   let match: RegExpExecArray | null;
@@ -270,6 +272,7 @@ interface ProviderConfigModalProps {
     name: string;
     api_key?: string;
     api_key_prefix?: string;
+    require_api_key?: boolean;
     api_key_prefixes?: string[];
     base_url?: string;
     is_custom: boolean;
@@ -281,7 +284,7 @@ interface ProviderConfigModalProps {
     auth_mode?: "api_key" | "auth_token";
     meta?: Record<string, unknown>;
   };
-  activeModels: any;
+  activeModels: ActiveModelsInfo | null;
   open: boolean;
   onClose: () => void;
   onSaved: () => void;
@@ -368,7 +371,7 @@ export function ProviderConfigModal({
 
   const validApiKeyPrefixes = useMemo(
     () => getValidApiKeyPrefixes(provider),
-    [provider.api_key_prefix, provider.api_key_prefixes],
+    [provider],
   );
 
   const apiKeyPlaceholder = useMemo(() => {
@@ -380,8 +383,12 @@ export function ProviderConfigModal({
         prefix: validApiKeyPrefixes.join(", "),
       });
     }
-    return t("models.enterApiKeyOptional");
-  }, [provider.api_key, validApiKeyPrefixes, t]);
+    return t(
+      provider.require_api_key
+        ? "models.enterApiKeyRequired"
+        : "models.enterApiKeyOptional",
+    );
+  }, [provider.api_key, provider.require_api_key, validApiKeyPrefixes, t]);
 
   const apiKeyLabel =
     isAnthropicProvider && authMode === "auth_token"
@@ -599,6 +606,7 @@ export function ProviderConfigModal({
       : t("models.revokeConfirmSimple", { name: provider.name });
 
     Modal.confirm({
+      className: styles.modelConfirmModal,
       title: t("models.revokeAuthorization"),
       content: confirmContent,
       okText: t("models.revokeAuthorization"),
@@ -628,7 +636,8 @@ export function ProviderConfigModal({
   };
 
   return (
-    <Modal
+    <SharedModal
+      surfaceId={`provider:${provider.id}`}
       width={800}
       className={styles.modelManageModal}
       title={t("models.configureProvider", { name: provider.name })}
@@ -645,7 +654,7 @@ export function ProviderConfigModal({
             {provider.support_connection_check && (
               <Button
                 size="small"
-                icon={<ApiOutlined />}
+                icon={<ApiOutlined size="1em" />}
                 onClick={handleTest}
                 loading={testing}
               >
@@ -762,7 +771,11 @@ export function ProviderConfigModal({
             onClick={() => setAdvancedOpen((prev) => !prev)}
           >
             <span className={styles.advancedConfigToggleLabel}>
-              {advancedOpen ? <DownOutlined /> : <RightOutlined />}
+              {advancedOpen ? (
+                <DownOutlined size="1em" />
+              ) : (
+                <RightOutlined size="1em" />
+              )}
               {t("models.advancedConfig")}
             </span>
           </button>
@@ -820,6 +833,7 @@ export function ProviderConfigModal({
                       }}
                     />
                     <CloseOutlined
+                      size="1em"
                       className={styles.customHeaderDelete}
                       onClick={() => {
                         setCustomHeaders(
@@ -876,6 +890,6 @@ export function ProviderConfigModal({
           </Form.Item>
         </div>
       </Form>
-    </Modal>
+    </SharedModal>
   );
 }

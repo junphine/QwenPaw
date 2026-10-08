@@ -1,6 +1,6 @@
 import { ProviderCredentialField } from "./ProviderCredentialField";
 import { ProviderCardStatus } from "./ProviderCardStatus";
-import { ModelCardSurface } from "./ModelCardSurface";
+import { InteractiveCard } from "@/components/interaction/InteractiveCard";
 import { ChevronRight } from "lucide-react";
 import { ProviderCloseButton } from "./ProviderCloseButton";
 import React, { useState } from "react";
@@ -20,6 +20,8 @@ interface ProviderGroupCardProps {
 
 const VARIANT_LABELS: Record<string, string> = {
   dashscope: "DashScope",
+  chat_completions: "Chat Completions",
+  responses: "Responses",
   open_platform: "Open Platform",
   open_platform_cn: "China",
   open_platform_intl: "International",
@@ -51,7 +53,11 @@ export const ProviderGroupCard = React.memo(function ProviderGroupCard({
   const hasFreeTier = activeProvider.is_free_tier;
 
   return (
-    <ModelCardSurface className={styles.groupCardGlass}>
+    <InteractiveCard
+      layoutId={`provider:${activeProvider.id}`}
+      className={styles.groupCardGlass}
+      tilt={2}
+    >
       <ProviderCloseButton
         ids={group.providers.map((provider) => provider.id)}
         onSaved={onSaved}
@@ -75,7 +81,9 @@ export const ProviderGroupCard = React.memo(function ProviderGroupCard({
           const label =
             VARIANT_LABELS[provider.provider_variant || ""] || provider.name;
           return (
-            <div
+            <button
+              type="button"
+              aria-pressed={idx === activeIdx}
               key={provider.id}
               className={[
                 styles.groupSegBtn,
@@ -90,7 +98,7 @@ export const ProviderGroupCard = React.memo(function ProviderGroupCard({
                 ].join(" ")}
               />
               {label}
-            </div>
+            </button>
           );
         })}
       </div>
@@ -98,7 +106,9 @@ export const ProviderGroupCard = React.memo(function ProviderGroupCard({
       {/* Content */}
       <div className={styles.groupCardContent}>
         <div className={styles.groupCardField}>
-          <span className={styles.groupCardFieldLabel}>Endpoint</span>
+          <span className={styles.groupCardFieldLabel}>
+            {t("models.baseURL")}
+          </span>
           <div className={styles.groupCardMono}>
             {activeProvider.base_url || "—"}
           </div>
@@ -128,6 +138,6 @@ export const ProviderGroupCard = React.memo(function ProviderGroupCard({
           <ChevronRight size={16} />
         </button>
       </div>
-    </ModelCardSurface>
+    </InteractiveCard>
   );
 });
