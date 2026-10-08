@@ -1,0 +1,22 @@
+{
+  "id": "puter-bot",
+  "name": "Puter Bot",
+  "version": "1.0.0",
+  "type": "channel",
+  "description": "Puter Bot Service channel (Bot Framework) integration for QwenPaw. Supports Teams, Slack, Web Chat and other Puter Bot channels.",
+  "description_i18n": {
+    "zh-CN": "Puter Bot Service（Bot Framework）消息频道，支持 Teams、Slack、Web Chat 等 Puter Bot 渠道。",
+    "en-US": "Puter Bot Service (Bot Framework) channel integration for QwenPaw. Supports Teams, Slack, Web Chat and other Puter Bot channels."
+  },
+  "author": "Puter Team",
+  "entry": {
+    "backend": "plugin.py"
+  },
+  "dependencies": [
+    "aiohttp>=3.8.0"
+  ],
+  "qwenpaw_version": {
+    "min": "2.0.0",
+    "max": "2.1.0"
+  }
+}
