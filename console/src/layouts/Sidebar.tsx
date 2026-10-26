@@ -49,7 +49,7 @@ import {
 } from "../stores/sessionListStore";
 import { useSidebarStore } from "../stores/sidebarStore";
 import { buildChatPath } from "../utils/sessionRoute";
-import { getOsRootHref } from "../utils/navigationMode";
+import { addRouterBasename, getOsRootHref } from "../utils/navigationMode";
 import { openExternalLink } from "../utils/openExternalLink";
 import {
   getSidebarCollapsedPreference,
@@ -60,6 +60,7 @@ import sessionApi from "../pages/Chat/sessionApi";
 import { useInboxWobble } from "../hooks/useInboxWobble";
 import styles from "./index.module.less";
 import { useTheme } from "../contexts/ThemeContext";
+import { useApprovalContext } from "../contexts/ApprovalContext";
 import { useMenuItems, useRoutes } from "../plugins/registry/hooks";
 import { Slot } from "../plugins/registry/Slot";
 import { flattenMenu } from "./registry/adapter";
@@ -203,6 +204,7 @@ export default function Sidebar({
   const [hasPendingApprovals, setHasPendingApprovals] = useState(false);
   const [shakeInbox, setShakeInbox] = useState(false);
   const [wobbleEnabled] = useInboxWobble();
+  const { approvals } = useApprovalContext();
   const currentApprovalIdsRef = useRef<Set<string>>(new Set());
   const seenApprovalIdsRef = useRef<Set<string>>(new Set());
 
@@ -353,33 +355,37 @@ export default function Sidebar({
   }, [collapsed]);
 
   useEffect(() => {
+    const currentIds = new Set(
+      approvals.map((approval) => approval.request_id),
+    );
+    currentApprovalIdsRef.current = currentIds;
+    const hasNewApprovals =
+      currentIds.size > 0 &&
+      [...currentIds].some((id) => !seenApprovalIdsRef.current.has(id));
+    setShakeInbox(hasNewApprovals);
+    setHasPendingApprovals(currentIds.size > 0);
+  }, [approvals]);
+
+  useEffect(() => {
+    let inFlight = false;
     const loadUnreadState = async () => {
+      if (inFlight) return;
+      inFlight = true;
       try {
-        const [inboxRes, pushRes] = await Promise.all([
-          api.getInboxEvents({
-            unread_only: true,
-            limit: 1,
-          }),
-          api.getPushMessages(),
-        ]);
+        const inboxRes = await api.getInboxEvents({
+          unread_only: true,
+          limit: 1,
+        });
         const hasUnreadEvents = (inboxRes?.events?.length || 0) > 0;
-        const approvals = pushRes?.pending_approvals || [];
-        const currentIds = new Set(
-          approvals.map((a: { request_id: string }) => a.request_id),
-        );
-        currentApprovalIdsRef.current = currentIds;
-        const hasNewApprovals =
-          currentIds.size > 0 &&
-          [...currentIds].some((id) => !seenApprovalIdsRef.current.has(id));
-        setShakeInbox(hasNewApprovals);
         setUnreadCount(
           inboxRes?.unread_count ??
             inboxRes?.total ??
             (hasUnreadEvents ? 1 : 0),
         );
-        setHasPendingApprovals(currentIds.size > 0);
       } catch {
         // Keep previous state when polling fails.
+      } finally {
+        inFlight = false;
       }
     };
     void loadUnreadState();
@@ -515,7 +521,10 @@ export default function Sidebar({
 
   const handleLogout = useCallback(() => {
     clearAuthToken();
-    window.location.href = "/login";
+    window.location.href = addRouterBasename(
+      window.location.pathname,
+      "/login",
+    );
   }, []);
 
   /**
@@ -573,7 +582,10 @@ export default function Sidebar({
       setAccountModalOpen(false);
       accountForm.resetFields();
       clearAuthToken();
-      window.location.href = "/login";
+      window.location.href = addRouterBasename(
+        window.location.pathname,
+        "/login",
+      );
     } catch (err: unknown) {
       const raw = err instanceof Error ? err.message : "";
       let msg = t("account.updateFailed");
@@ -621,6 +633,7 @@ export default function Sidebar({
         <button
           type="button"
           aria-label={typeof item.label === "string" ? item.label : undefined}
+          aria-current={isActive ? "page" : undefined}
           className={`${styles.collapsedNavItem} ${
             isActive ? styles.collapsedNavItemActive : ""
           }`}
@@ -628,7 +641,11 @@ export default function Sidebar({
             if (item.href) {
               openExternalLink(item.href);
             } else {
-              navigate(item.path);
+              navigate(
+                item.key === "core.inbox" && hasPendingApprovals
+                  ? `${item.path}?tab=approvals`
+                  : item.path,
+              );
             }
           }}
           onMouseEnter={
@@ -648,7 +665,9 @@ export default function Sidebar({
       <Tooltip
         key={entry.key}
         title={toolsMode === 2 ? null : entry.label}
-        placement="right"
+        placement="top"
+        trigger={["hover", "focus"]}
+        styles={{ root: { pointerEvents: "none" } }}
       >
         <button
           aria-label={typeof entry.label === "string" ? entry.label : undefined}
@@ -663,7 +682,11 @@ export default function Sidebar({
             if (entry.href) {
               openExternalLink(entry.href);
             } else {
-              navigate(entry.path);
+              navigate(
+                isInbox && hasPendingApprovals
+                  ? `${entry.path}?tab=approvals`
+                  : entry.path,
+              );
             }
           }}
         >
@@ -749,7 +772,7 @@ export default function Sidebar({
                 placement="rightTop"
                 trigger="click"
                 arrow={false}
-                overlayClassName={styles.collapsedAgentPopover}
+                classNames={{ root: styles.collapsedAgentPopover }}
                 content={
                   <div className={styles.collapsedAgentPanel}>
                     <div className={styles.collapsedPanelTitle}>
@@ -825,7 +848,7 @@ export default function Sidebar({
                 placement="rightTop"
                 trigger="click"
                 arrow={false}
-                overlayClassName={styles.collapsedHistoryPopover}
+                classNames={{ root: styles.collapsedHistoryPopover }}
                 content={
                   <div className={styles.collapsedHistoryPanel}>
                     <SidebarSessionList
@@ -949,18 +972,28 @@ export default function Sidebar({
                         </motion.div>
                       ))}
 
-                      <button
-                        type="button"
-                        className={skin.moreSettings}
-                        data-press
-                        aria-label={t("nav.moreSettings", "More settings")}
-                        onClick={handleOpenSettings}
+                      <Tooltip
+                        title={
+                          toolsMode === 2
+                            ? null
+                            : t("nav.moreSettings", "More settings")
+                        }
+                        placement="top"
+                        trigger={["hover", "focus"]}
                       >
-                        <Settings size={18} />
-                        <span className={skin.navLabel}>
-                          {t("nav.moreSettings", "More settings")}
-                        </span>
-                      </button>
+                        <button
+                          type="button"
+                          className={skin.moreSettings}
+                          data-press
+                          aria-label={t("nav.moreSettings", "More settings")}
+                          onClick={handleOpenSettings}
+                        >
+                          <Settings size={18} />
+                          <span className={skin.navLabel}>
+                            {t("nav.moreSettings", "More settings")}
+                          </span>
+                        </button>
+                      </Tooltip>
                     </motion.div>
                   </motion.div>
                 )}
@@ -1020,7 +1053,7 @@ export default function Sidebar({
             onOpenChange={setSettingsOpen}
             placement={collapsed ? "rightBottom" : "topRight"}
             trigger="click"
-            overlayClassName={styles.quickSettingsPopover}
+            classNames={{ root: styles.quickSettingsPopover }}
             destroyOnHidden
             content={
               <SidebarSettingsPanel

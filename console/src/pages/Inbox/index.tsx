@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useLocation, useSearchParams } from "react-router-dom";
 import {
   Tabs,
   Empty,
@@ -20,7 +21,10 @@ import {
   Lightbulb as BulbOutlined,
   Copy as CopyOutlined,
   ChevronDown as DownOutlined,
+  LoaderCircle,
+  RefreshCcw,
   ShieldCheck as SafetyOutlined,
+  TriangleAlert,
   Wrench as ToolOutlined,
 } from "lucide-react";
 import { PackageOpen, Bell, BellRing } from "lucide-react";
@@ -143,7 +147,14 @@ const getMailDetail = (messageItem: PushMessage | null): MailDetail | null => {
 
 export default function InboxPage() {
   const { t } = useTranslation();
-  const [activeTab, setActiveTab] = useState<TabKey>(resolveInitialTab);
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const requestedTab = searchParams.get("tab");
+  const [activeTab, setActiveTab] = useState<TabKey>(() =>
+    requestedTab === "approvals" || requestedTab === "messages"
+      ? requestedTab
+      : resolveInitialTab(),
+  );
   const [mailAclDrawerOpen, setMailAclDrawerOpen] = useState(false);
   const {
     pendingCount,
@@ -167,10 +178,13 @@ export default function InboxPage() {
   const {
     summary,
     pushMessages,
+    pushMessagesLoading,
+    pushMessagesError,
     markMessageAsRead,
     markAllMessagesAsRead,
     deleteMessage,
     deleteMessages,
+    refreshPushMessages,
   } = useInboxData();
   const agentDisplayNameById = useMemo(
     () =>
@@ -302,6 +316,12 @@ export default function InboxPage() {
     () => getMailDetail(selectedMessage),
     [selectedMessage],
   );
+
+  useEffect(() => {
+    if (requestedTab === "approvals" || requestedTab === "messages") {
+      setActiveTab(requestedTab);
+    }
+  }, [location.key, requestedTab]);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -476,7 +496,31 @@ export default function InboxPage() {
               )}
             </div>
           </div>
-          {filteredPushMessages.length > 0 ? (
+          {pushMessagesError ? (
+            <div className={styles.messagesError} role="alert">
+              <TriangleAlert size={18} aria-hidden="true" />
+              <span>{t("inbox.loadFailed")}</span>
+              <Button
+                icon={<RefreshCcw size={16} />}
+                loading={pushMessagesLoading}
+                onClick={() => void refreshPushMessages()}
+              >
+                {t("common.retry")}
+              </Button>
+            </div>
+          ) : null}
+          {pushMessagesLoading && pushMessages.length === 0 ? (
+            <div className={styles.messagesLoading} role="status">
+              <LoaderCircle
+                className={styles.messagesLoadingIcon}
+                size={20}
+                aria-hidden="true"
+              />
+              <span>{t("common.loading")}</span>
+            </div>
+          ) : pushMessagesError &&
+            pushMessages.length === 0 ? null : filteredPushMessages.length >
+            0 ? (
             <div className={styles.cardList}>
               {pagedPushMessages.map((item) => (
                 <PushMessageCard
@@ -592,11 +636,9 @@ export default function InboxPage() {
           <Badge dot={pendingCount > 0} offset={[-4, 4]}>
             <Button
               icon={<SafetyOutlined size="1em" />}
-              className={
-                mailAclNewArrival && wobbleEnabled
-                  ? styles.mailAclShake
-                  : undefined
-              }
+              className={`${styles.mailAclButton} ${
+                mailAclNewArrival && wobbleEnabled ? styles.mailAclShake : ""
+              }`}
               onMouseEnter={markMailAclSeen}
               onClick={() => {
                 markMailAclSeen();
@@ -627,9 +669,9 @@ export default function InboxPage() {
                 size="small"
                 icon={<BellRing size={16} />}
                 onClick={toggleWobble}
-                className={
-                  wobbleEnabled ? styles.wobbleToggleActive : undefined
-                }
+                className={`${styles.wobbleToggle} ${
+                  wobbleEnabled ? styles.wobbleToggleActive : ""
+                }`}
               />
             </Tooltip>
           }
