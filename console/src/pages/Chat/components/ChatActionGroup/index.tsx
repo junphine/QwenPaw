@@ -3,10 +3,11 @@ import React from "react";
 import { IconButton } from "@agentscope-ai/design";
 import { useTranslation } from "react-i18next";
 import { Flex, Tooltip, message } from "antd";
-import { Files, Terminal } from "lucide-react";
+import { Files, SquarePen, Terminal } from "lucide-react";
 import styles from "./ChatActionGroup.module.less";
 
 interface ChatActionGroupProps {
+  onNewChat?: () => void;
   onToggleTerminal?: () => void;
   terminalOpen?: boolean;
   terminalEnabled?: boolean;
@@ -16,6 +17,7 @@ interface ChatActionGroupProps {
 }
 
 const ChatActionGroup: React.FC<ChatActionGroupProps> = ({
+  onNewChat,
   onToggleTerminal,
   terminalOpen = false,
   terminalEnabled = false,
@@ -27,6 +29,28 @@ const ChatActionGroup: React.FC<ChatActionGroupProps> = ({
 
   return (
     <Flex className={styles.actionGroup} gap={8} align="center">
+      {onNewChat && (
+        <Tooltip title={t("chat.newTask")} mouseEnterDelay={0.5}>
+          <IconButton
+            className={styles.workspaceButton}
+            bordered={false}
+            aria-label={t("chat.newTask")}
+            icon={
+              <SquarePen
+                size={17}
+                strokeWidth={1.8}
+                style={{ width: 17, height: 17 }}
+              />
+            }
+            style={{
+              width: 32,
+              height: 32,
+              padding: 0,
+            }}
+            onClick={onNewChat}
+          />
+        </Tooltip>
+      )}
       {onToggleTerminal && (
         <Tooltip title={t("terminal.title")} mouseEnterDelay={0.5}>
           <IconButton

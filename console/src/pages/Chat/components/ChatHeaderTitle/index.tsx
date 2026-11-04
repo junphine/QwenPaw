@@ -1,7 +1,8 @@
-import React, { useEffect, useRef, useState } from "react";
-import { Dropdown } from "antd";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Dropdown, Input } from "antd";
+import type { InputRef } from "antd";
 import { useChatAnywhereSessionsState } from "@agentscope-ai/chat";
-import { Check, ChevronDown, Pencil, X, Clock3 } from "lucide-react";
+import { Check, Pencil, X, Clock3, Search, List } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useCodingMode } from "../../../../stores/codingModeStore";
 import type { ExtendedSession } from "../../../../stores/sessionListStore";
@@ -50,6 +51,15 @@ const ChatHeaderTitle: React.FC = () => {
   const chatName = currentSession?.name || "New Chat";
 
   const [open, setOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const searchInputRef = useRef<InputRef>(null);
+
+  // Focus the search box whenever the switcher opens.
+  useEffect(() => {
+    if (!open) return;
+    const timer = window.setTimeout(() => searchInputRef.current?.focus(), 0);
+    return () => window.clearTimeout(timer);
+  }, [open]);
 
   const handleSessionClick = (sessionId: string) => {
     navigate(buildChatPath(sessionApi.getEffectiveSessionId(sessionId)), {
@@ -58,7 +68,16 @@ const ChatHeaderTitle: React.FC = () => {
     setOpen(false);
   };
 
-  const menuItems = sessions.map((session) => {
+  // Filter the conversation list by title (case-insensitive).
+  const filteredSessions = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return sessions;
+    return sessions.filter((session) =>
+      (session.name || "New Chat").toLowerCase().includes(query),
+    );
+  }, [sessions, searchQuery]);
+
+  const menuItems = filteredSessions.map((session) => {
     const item = session as ExtendedSession;
     const date = new Date(item.updatedAt || item.createdAt || "");
     const valid = !Number.isNaN(date.getTime());
@@ -214,10 +233,47 @@ const ChatHeaderTitle: React.FC = () => {
               <Dropdown
                 menu={{ items: menuItems }}
                 open={open}
-                onOpenChange={setOpen}
+                onOpenChange={(nextOpen) => {
+                  setOpen(nextOpen);
+                  if (!nextOpen) setSearchQuery("");
+                }}
                 trigger={["click"]}
                 placement="bottomLeft"
                 rootClassName={styles.sessionDropdown}
+                popupRender={(menu) => (
+                  <div className={styles.dropdownPanel}>
+                    <div className={styles.searchBox}>
+                      <Input
+                        ref={searchInputRef}
+                        size="small"
+                        allowClear
+                        prefix={
+                          <Search
+                            size={14}
+                            className={styles.searchIcon}
+                            aria-hidden
+                          />
+                        }
+                        placeholder={t(
+                          "chat.sessionPanel.searchConversations",
+                          "Search conversations…",
+                        )}
+                        value={searchQuery}
+                        onChange={(event) => setSearchQuery(event.target.value)}
+                      />
+                    </div>
+                    {filteredSessions.length > 0 ? (
+                      menu
+                    ) : (
+                      <div className={styles.emptyState}>
+                        {t(
+                          "chat.sessionPanel.noMatchingConversations",
+                          "No matching conversations",
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
               >
                 <button
                   type="button"
@@ -226,7 +282,7 @@ const ChatHeaderTitle: React.FC = () => {
                   aria-haspopup="menu"
                   aria-expanded={open}
                 >
-                  <ChevronDown size={14} />
+                  <List size={14} />
                 </button>
               </Dropdown>
             )}

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/common_setup";
 import ChatHeaderTitle from "./index";
@@ -96,6 +96,53 @@ describe("ChatHeaderTitle", () => {
         ".qwenpaw-dropdown, .ant-dropdown",
       ),
     ).toHaveClass(styles.sessionDropdown);
+  });
+
+  it("filters the conversation list by title", async () => {
+    const user = userEvent.setup();
+    mockUseChatAnywhereSessionsState.mockReturnValue({
+      sessions: [
+        { id: "sess-1", name: "Alpha Chat" },
+        { id: "sess-2", name: "Beta Chat" },
+      ],
+      currentSessionId: "sess-1",
+    });
+
+    renderWithProviders(<ChatHeaderTitle />);
+    await user.click(
+      screen.getByRole("button", { name: "chat.switchSession" }),
+    );
+
+    const searchInput = await screen.findByRole("textbox");
+    await user.type(searchInput, "beta");
+
+    const menu = await screen.findByRole("menu");
+    expect(within(menu).getByText("Beta Chat")).toBeInTheDocument();
+    expect(within(menu).queryByText("Alpha Chat")).not.toBeInTheDocument();
+  });
+
+  it("shows an empty state when no conversation matches the search", async () => {
+    const user = userEvent.setup();
+    mockUseChatAnywhereSessionsState.mockReturnValue({
+      sessions: [
+        { id: "sess-1", name: "Alpha Chat" },
+        { id: "sess-2", name: "Beta Chat" },
+      ],
+      currentSessionId: "sess-1",
+    });
+
+    renderWithProviders(<ChatHeaderTitle />);
+    await user.click(
+      screen.getByRole("button", { name: "chat.switchSession" }),
+    );
+
+    const searchInput = await screen.findByRole("textbox");
+    await user.type(searchInput, "zzz");
+
+    expect(
+      await screen.findByText("No matching conversations"),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 });
 

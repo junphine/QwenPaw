@@ -17,7 +17,30 @@ describe("ChatActionGroup", () => {
     expect(document.querySelector(".anticon-more")).not.toBeInTheDocument();
   });
 
-  it("replaces the new task action with the terminal before the workspace toggle", () => {
+  it("renders the new task action first when a handler is provided", () => {
+    const onNewChat = vi.fn();
+    const onToggleTerminal = vi.fn();
+    renderWithProviders(
+      <ChatActionGroup
+        onNewChat={onNewChat}
+        terminalEnabled
+        onToggleTerminal={onToggleTerminal}
+        onToggleWorkspace={vi.fn()}
+      />,
+    );
+
+    const newTask = screen.getByRole("button", { name: "chat.newTask" });
+    const terminal = screen.getByRole("button", { name: "terminal.title" });
+    const workspace = screen.getByRole("button", {
+      name: "files.openWorkspace",
+    });
+    expect(screen.getAllByRole("button")).toEqual([newTask, terminal, workspace]);
+    expect(newTask.querySelector("svg")).toBeInTheDocument();
+    fireEvent.click(newTask);
+    expect(onNewChat).toHaveBeenCalledOnce();
+  });
+
+  it("omits the new task action and places the terminal before the workspace toggle", () => {
     const onToggleTerminal = vi.fn();
     renderWithProviders(
       <ChatActionGroup

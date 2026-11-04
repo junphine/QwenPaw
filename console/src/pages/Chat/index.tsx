@@ -1357,6 +1357,13 @@ export default function ChatPage() {
       trigger: null,
     });
   }, [currentSessionFilesScopeKey, dispatchFilesDrawer]);
+  const handleNewChat = useCallback(() => {
+    if (sessionApi.isSessionSwitching) {
+      sessionApi.finishSessionSwitch();
+      window.dispatchEvent(new CustomEvent("qwenpaw:sidebar-switch-done"));
+    }
+    window.dispatchEvent(new CustomEvent("qwenpaw:sidebar-new-chat"));
+  }, []);
   const loopAvailableModes = useLoopStore((state) => state.availableModes);
 
   useEffect(() => {
@@ -3993,6 +4000,7 @@ export default function ChatPage() {
             <ChatHeaderTitle />
             <span className={styles.headerSpacer} />
             <ChatActionGroup
+              onNewChat={handleNewChat}
               onToggleTerminal={toggleTerminal}
               terminalEnabled={terminalEnabled}
               terminalDisabledReason={terminalDisabledReason}

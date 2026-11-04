@@ -180,6 +180,8 @@ export default function Sidebar({
   ][toolsMode];
   const setPersistedToolsMode = (next: number) => {
     if (next === 1 || next === 2) {
+      // modify@byron always toolsDetailed
+      next = 2;
       lastOpenToolsModeRef.current = next;
     }
     setToolsMode(next);
@@ -1033,15 +1035,6 @@ export default function Sidebar({
                 )}
               </AnimatePresence>
             </InteractiveCard>
-            <button
-              type="button"
-              data-press
-              className={skin.newTask}
-              onClick={handleNewChat}
-            >
-              <SparkNewChatLine size={18} />
-              <span>{t("chat.newTask", "New task")}</span>
-            </button>
             <div className={skin.pluginSlot}>
               <Slot name="sider.top" kind="fill" />
             </div>
@@ -1050,7 +1043,6 @@ export default function Sidebar({
             <div className={styles.sessionArea}>
               <SidebarSessionList
                 defaultSearchOpen
-                hideNewTask
                 onNewChat={handleNewChat}
                 onSessionClick={handleSidebarSessionClick}
               />

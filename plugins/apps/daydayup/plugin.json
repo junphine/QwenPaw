@@ -4,7 +4,7 @@
   "version": "2.1.0",
   "description": "AI学习陪伴助手 - 基于 Deep Tutor 架构的完整学习系统，融合 QwenPaw 环境",
   "author": "0+1+2≠3 Team 115886",
-  "type": "frontend",
+  "type": "app",
   "qwenpaw_version": {
     "min": "2.0.0",
     "max": "2.9.0"

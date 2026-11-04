@@ -1,0 +1,36 @@
+{
+  "id": "app-home",
+  "name": "应用首页",
+  "version": "0.3.0",
+  "description": "QwenPaw 应用仪表盘首页：集中展示已安装应用卡片、系统概览（主机/OS/Python 版本/运行时长/插件数）、Agent 列表、常用工具入口、定时任务速览、Token 用量趋势。数据经插件后端聚合，纯只读。应用启动入口：应用 → 应用首页 🏠",
+  "author": "CC",
+  "license": "Apache-2.0",
+  "type": "app",
+  "qwenpaw_version": {
+    "min": "2.0.0",
+    "max": "2.1.0"
+  },
+  "entry": {
+    "backend": "backend/main.py",
+    "frontend": "ui/index.js"
+  },
+  "permissions": [
+    "workspace.read"
+  ],
+  "menu": {
+    "label": "应用首页",
+    "icon": "🏠",
+    "description": "QwenPaw 应用仪表盘首页",
+    "location": "primary.settings"
+  },
+  "meta": {
+    "category": "productivity",
+    "icon": "🏠",
+    "pawapp": {
+      "icon": "🏠",
+      "category": "productivity",
+      "entry_page": "/apps/app-home",
+      "launch_scope": "page"
+    }
+  }
+}

@@ -35,6 +35,7 @@
   ],
   "meta": {
     "pawapp": {
+      "icon": "💬",
       "category": "productivity",
       "entry_page": "/apps/group-chat-health",
       "launch_scope": "page"

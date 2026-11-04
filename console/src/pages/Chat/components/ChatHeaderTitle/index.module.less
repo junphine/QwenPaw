@@ -110,6 +110,36 @@
   }
 }
 
+/* ---- Session switcher search box ---- */
+.dropdownPanel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.searchBox {
+  flex-shrink: 0;
+  padding: 8px 8px 2px;
+
+  :global(.ant-input-affix-wrapper) {
+    background: var(--app-fill-subtle);
+    border-radius: 8px;
+  }
+}
+
+.searchIcon {
+  color: var(--app-text-tertiary);
+}
+
+.emptyState {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px 12px;
+  font-size: var(--app-font-caption);
+  color: var(--app-text-tertiary);
+}
+
 /* ---- Dropdown menu items ---- */
 .menuItem {
   display: flex;

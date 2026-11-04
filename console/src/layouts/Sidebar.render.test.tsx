@@ -739,7 +739,7 @@ describe("Sidebar", () => {
 
     fireEvent.click(await screen.findByTestId("sl-click"));
     mocks.isSessionSwitching = true;
-    fireEvent.click(screen.getByRole("button", { name: "New task" }));
+    fireEvent.click(screen.getByTestId("sl-new-chat"));
     expect(controller.signal.aborted).toBe(true);
     expect(onDone).toHaveBeenCalledOnce();
     expect(screen.getByTestId("probe-path").textContent).toBe("/chat");
