@@ -315,6 +315,7 @@ def _extract_session_and_payload(request_data: Union[AgentRequest, dict]):
         content_parts = (
             list(request_data.input[0].content) if request_data.input else []
         )
+        metadata = request_data.metadata
         message_metadata = (
             request_data.input[0].metadata if request_data.input else None
         )
@@ -323,6 +324,7 @@ def _extract_session_and_payload(request_data: Union[AgentRequest, dict]):
         sender_id = request_data.get("user_id", "default")
         session_id = request_data.get("session_id", "default")
         input_data = request_data.get("input", [])
+        metadata = request_data.get("metadata", {})
         content_parts = []
         message_metadata = None
         for content_part in input_data:
@@ -347,7 +349,8 @@ def _extract_session_and_payload(request_data: Union[AgentRequest, dict]):
         "session_id": session_id,
         "user_id": sender_id,
     }
-
+    if metadata:
+        meta.update(metadata)
     # Preserve request_context (e.g. session-level approval_level)
     if isinstance(request_data, AgentRequest):
         rc = getattr(request_data, "request_context", None)

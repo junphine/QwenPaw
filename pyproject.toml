@@ -27,7 +27,7 @@ dependencies = [
     "transformers>=4.30.0",
     "python-dotenv>=1.0.0",
     "python-socks>=2.5.3",
-    "onnxruntime<1.24",
+    #"onnxruntime<1.24",
     "pywebview>=4.0",
     "aiofiles>=24.1.0",
     "shortuuid>=1.0.0",
