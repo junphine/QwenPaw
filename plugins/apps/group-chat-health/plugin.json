@@ -1,0 +1,58 @@
+{
+  "id": "group-chat-health",
+  "name": "Group Chat",
+  "version": "0.3.4",
+  "type": "app",
+  "description": "Create group chats with any enabled QwenPaw agents, intelligent routing, multi-mentions, hand-offs, attachments, and durable history.",
+  "description_i18n": {
+    "zh-CN": "通用多智能体群聊插件。可选择任意已启用的 QwenPaw Agent，支持智能路由、多成员 @、Agent 接力、附件、重试与持久化。",
+    "en-US": "Generic multi-agent group chat for any enabled QwenPaw agents, with routing, multi-mentions, hand-offs, attachments, retry, and persistence."
+  },
+  "author": "QwenPaw Team",
+  "entry": {
+    "backend": "plugin.py",
+    "frontend": "frontend/dist/index.js"
+  },
+  "dependencies": [
+    "python-multipart>=0.0.9"
+  ],
+  "qwenpaw_version": {
+    "min": "2.2.0",
+    "max": "2.3.0"
+  },
+  "pack_exclude": [
+    "frontend/node_modules",
+    "frontend/src",
+    "frontend/index.html",
+    "frontend/package.json",
+    "frontend/package-lock.json",
+    "frontend/tsconfig.json",
+    "frontend/vite.config.ts",
+    "qa",
+    "tests",
+    "__pycache__",
+    "backend/__pycache__"
+  ],
+  "meta": {
+    "pawapp": {
+      "category": "productivity",
+      "entry_page": "/apps/group-chat-health",
+      "launch_scope": "page"
+    },
+    "permissions": {
+      "chat": true,
+      "storage": true
+    },
+    "settings": [],
+    "category": "multi-agent",
+    "features": [
+      "group-chat",
+      "intelligent-routing",
+      "live-agent-catalog",
+      "agent-handoffs",
+      "mention-support",
+      "attachments",
+      "proactive-push"
+    ]
+  }
+}
