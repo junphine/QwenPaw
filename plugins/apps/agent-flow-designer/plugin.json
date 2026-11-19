@@ -1,0 +1,36 @@
+{
+  "id": "agent-flow-designer",
+  "name": "Agent Flow Designer",
+  "version": "2.6.8",
+  "description": "Agent Flow Designer（简称AFD） 是一款面向 QwenPaw 平台的可视化智能体工作流编排插件，通过拖拽方式即可快速构建、发布、部署和管理多节点协作的 Agent 工作流。\n插件提供基于 AntV X6 的拖拽式画布，支持开始、Agent、工具、路由决策、人工介入、结束 6 种节点类型，可自由连线实现条件分支与数据流转。工具节点支持宿主内置工具、MCP 服务、外部 HTTP 三种来源，其中宿主工具受治理策略约束，被策略要求审批时工作流会暂停等待人工批准。路由决策节点内置丰富的条件运算符，并支持规则匹配、LLM 智能路由及混合模式三种路由方式。\n核心能力包括：可视化工作流编排、版本化发布（配置快照）、一键部署对外服务，以及提供 /run 统一执行接口。编辑态与发布态完全隔离，部署后使用版本快照运行，保障线上服务稳定性。\n\n我们希望通过这个项目，为大家提供一个坚实的二次开发起点，诚邀各位开发者共同参与，携手繁荣 QwenPaw 生态。",
+  "description_i18n": {
+    "zh-CN": "Agent Flow Designer（简称AFD） 是一款面向 QwenPaw 平台的可视化智能体工作流编排插件，通过拖拽方式即可快速构建、发布、部署和管理多节点协作的 Agent 工作流。\n插件提供基于 AntV X6 的拖拽式画布，支持开始、Agent、工具、路由决策、人工介入、结束 6 种节点类型，可自由连线实现条件分支与数据流转。工具节点支持宿主内置工具、MCP 服务、外部 HTTP 三种来源，其中宿主工具受治理策略约束，被策略要求审批时工作流会暂停等待人工批准。路由决策节点内置丰富的条件运算符，并支持规则匹配、LLM 智能路由及混合模式三种路由方式。\n核心能力包括：可视化工作流编排、版本化发布（配置快照）、一键部署对外服务，以及提供 /run 统一执行接口。编辑态与发布态完全隔离，部署后使用版本快照运行，保障线上服务稳定性。\n\n我们希望通过这个项目，为大家提供一个坚实的二次开发起点，诚邀各位开发者共同参与，携手繁荣 QwenPaw 生态。",
+    "en-US": "Agent Flow Designer (AFD) is a visual agent-workflow builder for the QwenPaw platform. Drag and drop on an AntV X6 canvas to wire up Start, Agent, Tool, Router, Human Approval and End nodes, with conditional branching and data flow. Tool nodes reach host tools (policy-governed, pausing for approval when required), MCP servers and external HTTP APIs. Each publish takes a version snapshot, so deployed workflows always run on an immutable configuration.",
+    "ja": "QwenPaw 向けのビジュアルなエージェントワークフロー構築プラグインです。AntV X6 のキャンバスをドラッグ＆ドロップして、開始・Agent・ツール・ルーター・人間承認・終了の各ノードを配線し、条件分岐やデータフローを組み立てられます。ツールノードはホスト組み込みツール（ポリシーで管理され、承認が必要なら一時停止）、MCP サーバー、外部 HTTP API を呼び出せます。公開ごとにバージョンのスナップショットを取得し、運用中のワークフローは変更されない設定で実行されます。",
+    "ru": "Визуальный конструктор агентных рабочих процессов для платформы QwenPaw. Перетаскиванием на холсте AntV X6 соединяйте узлы «Начало», «Агент», «Инструмент», «Маршрутизатор», «Одобрение человеком» и «Конец», задавайте ветвления и потоки данных. Узел «Инструмент» вызывает встроенные инструменты хоста (под управлением политик, с паузой на одобрение), MCP-серверы и внешние HTTP API. Каждый выпуск сохраняет снимок версии, поэтому развернутые процессы работают на неизменяемой конфигурации.",
+    "pt-BR": "Construtor visual de fluxos de agentes para a plataforma QwenPaw. Arraste e solte no canvas AntV X6 para ligar os nós Início, Agente, Ferramenta, Roteador, Aprovação humana e Fim, com ramificações condicionais e fluxo de dados. O nó Ferramenta acessa ferramentas do host (governadas por política, com pausa para aprovação), servidores MCP e APIs HTTP externas. Cada publicação gera um snapshot versionado, então os fluxos implantados rodam sobre uma configuração imutável.",
+    "id": "Plugin perancang alur kerja agen secara visual untuk platform QwenPaw. Dengan seret-lepas di kanvas AntV X6, Anda merangkai node Mulai, Agen, Alat, Perute, Persetujuan Manusia, dan Selesai, lengkap dengan percabangan bersyarat dan aliran data. Node Alat memanggil alat bawaan host (diatur kebijakan, bisa jeda menunggu persetujuan), server MCP, dan API HTTP eksternal. Setiap publikasi menyimpan snapshot versi, sehingga alur kerja yang diterapkan berjalan dengan konfigurasi yang tidak berubah.",
+    "vi": "Plugin trực quan hóa việc xây dựng quy trình tác nhân cho nền tảng QwenPaw. Kéo-thả trên canvas AntV X6 để nối các node Bắt đầu, Tác nhân, Công cụ, Bộ định tuyến, Phê duyệt con người và Kết thúc, kèm rẽ nhánh điều kiện và luồng dữ liệu. Node Công cụ gọi công cụ tích hợp của host (chính sách quản lý, có tạm dừng chờ phê duyệt), máy chủ MCP và API HTTP bên ngoài. Mỗi lần phát hành lưu snapshot phiên bản, nên quy trình đã triển khai chạy trên cấu hình bất biến."
+  },
+  "author": "Agent Flow Designer Team",
+  "type": "app",
+  "entry": {
+    "backend": "backend/plugin.py",
+    "frontend": "ui/plugin-entry.js"
+  },
+  "qwenpaw_version": {
+    "min": "2.0.0", "max": "2.9.9"
+  },
+  "meta": {
+    "pawapp": {
+      "icon": "🧩",
+      "category": "automation",
+      "entry_page": "/apps/agent-flow-designer",
+      "launch_scope": "page"
+    },
+    "permissions": {
+      "chat": true,
+      "storage": true
+    }
+  }
+}

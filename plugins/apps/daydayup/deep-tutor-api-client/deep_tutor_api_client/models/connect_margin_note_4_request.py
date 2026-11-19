@@ -1,0 +1,81 @@
+from __future__ import annotations
+
+from collections.abc import Mapping
+from typing import Any, TypeVar
+
+from attrs import define as _attrs_define
+from attrs import field as _attrs_field
+
+from ..types import UNSET, Unset
+
+T = TypeVar("T", bound="ConnectMarginNote4Request")
+
+
+@_attrs_define
+class ConnectMarginNote4Request:
+    """
+    Attributes:
+        name (str):
+        db_path (str | Unset):  Default: ''.
+        description (str | Unset):  Default: ''.
+    """
+
+    name: str
+    db_path: str | Unset = ""
+    description: str | Unset = ""
+    additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        name = self.name
+
+        db_path = self.db_path
+
+        description = self.description
+
+        field_dict: dict[str, Any] = {}
+        field_dict.update(self.additional_properties)
+        field_dict.update(
+            {
+                "name": name,
+            }
+        )
+        if db_path is not UNSET:
+            field_dict["db_path"] = db_path
+        if description is not UNSET:
+            field_dict["description"] = description
+
+        return field_dict
+
+    @classmethod
+    def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        d = dict(src_dict)
+        name = d.pop("name")
+
+        db_path = d.pop("db_path", UNSET)
+
+        description = d.pop("description", UNSET)
+
+        connect_margin_note_4_request = cls(
+            name=name,
+            db_path=db_path,
+            description=description,
+        )
+
+        connect_margin_note_4_request.additional_properties = d
+        return connect_margin_note_4_request
+
+    @property
+    def additional_keys(self) -> list[str]:
+        return list(self.additional_properties.keys())
+
+    def __getitem__(self, key: str) -> Any:
+        return self.additional_properties[key]
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        self.additional_properties[key] = value
+
+    def __delitem__(self, key: str) -> None:
+        del self.additional_properties[key]
+
+    def __contains__(self, key: str) -> bool:
+        return key in self.additional_properties
