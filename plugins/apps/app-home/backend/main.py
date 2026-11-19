@@ -4,16 +4,23 @@
 功能：
   - 启动默认应用：让用户选定一个应用，QwenPaw 桌面版启动时先打开它
   - ON/OFF 开关：控制是否启用"启动默认应用"行为
+  - 轻应用管理：创建/编辑/删除轻应用（name + url），并在首页展示
 
-HTTP 接口（挂载在 /api/app-home）：
+HTTP 接口（挂载在 /api/plugins/app-home）：
 
-  ===============  =========================================================
-  ``GET  /apps``   扫描 ~/.qwenpaw/plugins/*/plugin.json，返回可启动应用列表
-  ``GET  /default``  当前默认启动应用 + ON/OFF 状态
-  ``POST /default``  设置默认启动应用（{"id": "xxx", "enabled": true}）
-  ===============  =========================================================
+  =====================  =====================================================
+  ``GET  /apps``          扫描 ~/.qwenpaw/plugins/*/plugin.json，返回可启动应用列表
+  ``GET  /default``       当前默认启动应用 + ON/OFF 状态
+  ``POST /default``       设置默认启动应用（{"id": "xxx", "enabled": true}）
+  ``GET  /lightapps``     轻应用列表
+  ``POST /lightapps``     创建轻应用（{"name": "...", "url": "..."}）
+  ``PUT  /lightapps/{id}``  更新轻应用
+  ``DELETE /lightapps/{id}`` 删除轻应用
+  =====================  =====================================================
 
-配置存储：~/.qwenpaw/plugins/app-home/config.json（纯本地，只写本插件目录）
+配置存储：
+  - 默认启动配置：~/.qwenpaw/plugins/app-home/config.json（纯本地，只写本插件目录）
+  - 轻应用数据：$QWENPAW_WORKING_DIR/lightapp_data/apps.json（与原 qwenpaw-lightapp 共用）
 """
 
 from __future__ import annotations
@@ -32,13 +39,18 @@ from qwenpaw.plugins.api import PluginApi
 
 logger = logging.getLogger("qwenpaw.plugins.app-home")
 
-PLUGIN_VERSION = "0.3.0"
+PLUGIN_VERSION = "0.4.0"
 PLUGIN_ID = "app-home"
 STARTED_AT = time.time()  # 后端启动时间戳，作为"本次启动"的判据
 
 _PLUGIN_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
 _CONFIG_FILE = _PLUGIN_DIR.parent / "config.json"  # ~/.qwenpaw/plugins/app-home/config.json
 _PLUGINS_ROOT = Path(os.path.expanduser("~")) / ".qwenpaw" / "plugins"
+
+# 轻应用数据（与原 qwenpaw-lightapp 共用同一数据文件，迁移零成本）
+_WORKING_DIR = Path(os.environ.get("QWENPAW_WORKING_DIR", Path.home() / ".qwenpaw"))
+_LIGHTAPP_DIR = _WORKING_DIR / "lightapp_data"
+_LIGHTAPP_FILE = _LIGHTAPP_DIR / "apps.json"
 
 
 # ---------- 配置读写 ----------
@@ -71,6 +83,41 @@ def _save_config(cfg: Dict[str, Any]) -> None:
     tmp.replace(_CONFIG_FILE)
     logger.info("[app-home] config saved: default_app_id=%s enabled=%s",
                 cfg.get("default_app_id"), cfg.get("enabled"))
+
+
+# ---------- 轻应用读写（与原 qwenpaw-lightapp 数据兼容） ----------
+
+def _load_lightapps() -> List[Dict[str, Any]]:
+    """读取所有轻应用（容错：目录/文件不存在或损坏返回空列表）。"""
+    if not _LIGHTAPP_FILE.exists():
+        return []
+    try:
+        data = json.loads(_LIGHTAPP_FILE.read_text(encoding="utf-8"))
+        if isinstance(data, list):
+            return data
+        if isinstance(data, dict):
+            # 兼容旧格式 {"apps": [...]}
+            return data.get("apps") if isinstance(data.get("apps"), list) else []
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[app-home] lightapps read failed: %s", exc)
+    return []
+
+
+def _save_lightapps(apps: List[Dict[str, Any]]) -> None:
+    """写入轻应用（原子写：先写临时再 rename）。"""
+    _LIGHTAPP_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = _LIGHTAPP_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(apps, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(_LIGHTAPP_FILE)
+    logger.info("[app-home] lightapps saved: %d app(s)", len(apps))
+
+
+def _validate_lightapp_url(url: str) -> str:
+    """校验并规整轻应用 URL：必须以 http(s):// 开头。"""
+    url = (url or "").strip()
+    if not url.startswith(("http://", "https://")):
+        raise HTTPException(status_code=400, detail="URL必须以http://或https://开头")
+    return url
 
 
 # ---------- 应用扫描（只读，单坏目录隔离） ----------
@@ -136,6 +183,20 @@ class DefaultAppPayload(BaseModel):
 class FrontendLogPayload(BaseModel):
     step: str = Field(default="", description="前端执行到的步骤")
     detail: str = Field(default="", description="附加信息（URL/错误等）")
+
+
+class LightAppCreate(BaseModel):
+    name: str = Field(description="轻应用名称")
+    url: str = Field(description="轻应用 URL，须以 http(s):// 开头")
+    width: str = Field(default="100%", description="展示宽度（如 100% 或 800px）")
+    height: str = Field(default="100%", description="展示高度（如 100% 或 600px）")
+
+
+class LightAppUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, description="轻应用名称")
+    url: Optional[str] = Field(default=None, description="轻应用 URL")
+    width: Optional[str] = Field(default=None, description="展示宽度")
+    height: Optional[str] = Field(default=None, description="展示高度")
 
 
 router = APIRouter()
@@ -215,6 +276,79 @@ async def set_default(payload: DefaultAppPayload):
         "enabled": cfg.get("enabled", False),
         "path": _resolve_app_path(app_id) if app_id else "",
     })
+
+
+# ---------- 轻应用 CRUD ----------
+
+def _lightapp_with_id(apps: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """给轻应用补齐基于索引的 ``id`` 字段（与原 qwenpaw-lightapp 一致）。"""
+    out = []
+    for i, app in enumerate(apps):
+        item = dict(app)
+        item["id"] = i
+        out.append(item)
+    return out
+
+
+@router.get("/lightapps")
+async def list_lightapps():
+    """获取所有轻应用。"""
+    return JSONResponse({"ok": True, "apps": _lightapp_with_id(_load_lightapps())})
+
+
+@router.post("/lightapps")
+async def create_lightapp(payload: LightAppCreate):
+    """创建新轻应用。"""
+    name = (payload.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="名称不能为空")
+    url = _validate_lightapp_url(payload.url)
+
+    apps = _load_lightapps()
+    new_app = {
+        "name": name,
+        "url": url,
+        "width": (payload.width or "100%").strip(),
+        "height": (payload.height or "100%").strip(),
+    }
+    apps.append(new_app)
+    _save_lightapps(apps)
+    return JSONResponse({"ok": True, "app": new_app, "id": len(apps) - 1})
+
+
+@router.put("/lightapps/{app_id}")
+async def update_lightapp(app_id: int, payload: LightAppUpdate):
+    """更新轻应用。"""
+    apps = _load_lightapps()
+    if app_id < 0 or app_id >= len(apps):
+        raise HTTPException(status_code=404, detail="轻应用不存在")
+
+    app = apps[app_id]
+    if payload.name is not None:
+        name = payload.name.strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="名称不能为空")
+        app["name"] = name
+    if payload.url is not None:
+        app["url"] = _validate_lightapp_url(payload.url)
+    if payload.width is not None:
+        app["width"] = payload.width.strip()
+    if payload.height is not None:
+        app["height"] = payload.height.strip()
+
+    _save_lightapps(apps)
+    return JSONResponse({"ok": True, "app": app, "id": app_id})
+
+
+@router.delete("/lightapps/{app_id}")
+async def delete_lightapp(app_id: int):
+    """删除指定轻应用。"""
+    apps = _load_lightapps()
+    if app_id < 0 or app_id >= len(apps):
+        raise HTTPException(status_code=404, detail="轻应用不存在")
+    deleted = apps.pop(app_id)
+    _save_lightapps(apps)
+    return JSONResponse({"ok": True, "deleted_app": deleted})
 
 
 # ---------- 启动钩子：把"默认应用 + enabled"广播给前端 ----------

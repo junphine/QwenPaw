@@ -119,6 +119,7 @@ const DaydayupApp: React.FC<PluginProps> = ({ config }) => {
   };
 
   if (loading) {
+    // @ts-ignore
     return (
       <div className="daydayup-loading">
         <div className="loading-spinner">📚</div>

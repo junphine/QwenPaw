@@ -7,7 +7,7 @@
   "type": "app",
   "qwenpaw_version": {
     "min": "2.0.0",
-    "max": "2.9.0"
+    "max": "2.9.9"
   },
   "entry": {
     "backend": "plugin.py",
@@ -42,7 +42,49 @@
       "category": "education",
       "entry_page": "/apps/daydayup",
       "launch_scope": "page"
-    }
+    },
+    "tools": [
+      {
+        "name": "save_memory",
+        "description": "Save a memory to the Daydayup memory system",
+        "icon": "💾",
+        "requires_config": false
+      },
+      {
+        "name": "search_memories",
+        "description": "Search memories in the Daydayup memory system",
+        "icon": "🔍",
+        "requires_config": false
+      },
+      {
+        "name": "get_memory_stats",
+        "description": "Get statistics about the Daydayup memory system",
+        "icon": "📊",
+        "requires_config": false
+      },
+      {
+        "name": "list_knowledge_bases",
+        "description": "List deeptutor knowledge bases.",
+        "icon": "🎨",
+        "requires_config": true,
+        "config_fields": [
+          {
+            "name": "deeptutor_workspace",
+            "label": "DeepTutor Workspace Id",
+            "type": "text",
+            "required": false,
+            "placeholder": "ws_xxx",
+            "help": "Choose DeepTutor workspace (leave empty to use default workspace)"
+          }
+        ]
+      },
+      {
+        "name": "rag_search",
+        "description": "Run a RAG query against a knowledge base.",
+        "icon": "🖼️",
+        "requires_config": false
+      }
+    ]
   },
   "settings_schema": {
     "type": "object",

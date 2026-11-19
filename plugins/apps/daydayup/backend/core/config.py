@@ -63,24 +63,30 @@ class UIConfig:
     sidebar_collapsed: bool = False
     font_size: str = "medium"
 
+def extract_dt_token(text: str) -> str | None:
+    for part in text.split(";"):
+        part = part.strip()
+        if part.startswith("dt_token="):
+            return part[len("dt_token="):]
+    return None
 
 class Config:
     """
     配置管理器
     管理插件的所有配置
     """
-    
+
     def __init__(self, data_dir: Path):
         self.data_dir = data_dir
         self.config_dir = data_dir / "config"
         self.config_dir.mkdir(exist_ok=True)
-        
+
         # 配置文件路径
         self.main_config_file = self.config_dir / "main.json"
         self.models_config_file = self.config_dir / "models.json"
         self.ui_config_file = self.config_dir / "ui.json"
         self.secrets_file = self.config_dir / ".secrets.json"
-        
+
         # 配置缓存
         self._config: Dict[str, Any] = {}
         self._models: Dict[str, ModelConfig] = {}
@@ -88,17 +94,46 @@ class Config:
         self._knowledge: Optional[KnowledgeConfig] = None
         self._partner: Optional[PartnerConfig] = None
         self._ui: Optional[UIConfig] = None
-        
+        self._token = None
         # 加载配置
         self._load_all()
-    
+
+    def get_workspace(self):
+        from qwenpaw.plugins import get_tool_config
+        tool_config = get_tool_config("list_knowledge_bases")
+        if tool_config:
+            return tool_config.get('deeptutor_workspace')
+        return None
+
+    def get_token(self):
+        if not self._token:
+            from deep_tutor_api_client import Client
+            from deep_tutor_api_client.models.login_request import LoginRequest
+            from deep_tutor_api_client.api.auth import do_login
+            from deep_tutor_api_client.types import Response
+            login = LoginRequest(self.get("deeptutor_user"),self.get("deeptutor_password"))
+            endpoint = self.get("deeptutor_api_endpoint")
+            client = Client(base_url=endpoint)
+            with client as client:
+                response:Response = do_login.sync_detailed(client=client,body=login)
+
+            if response.status_code==200:
+                self._token = response.headers.get("x-auth-token")
+                if not self._token:
+                    cookies = response.headers.get('set-cookie','')
+                    self._token = extract_dt_token(cookies)
+            else:
+                error_msg = f"DeepTutor API error: {response.status_code}"
+                logger.error("[Config] deeptutor user login failed:"+error_msg)
+        return self._token
+
     def _load_all(self):
         """加载所有配置"""
         self._load_main_config()
         self._load_models_config()
         self._load_ui_config()
         logger.info("[Config] All configurations loaded")
-    
+
     def _load_main_config(self):
         """加载主配置"""
         if self.main_config_file.exists():
@@ -111,7 +146,7 @@ class Config:
         else:
             self._config = self._default_main_config()
             self._save_main_config()
-    
+
     def _default_main_config(self) -> Dict[str, Any]:
         """默认主配置"""
         return {
@@ -126,11 +161,14 @@ class Config:
                 "learning_space": True,
                 "my_agents": True
             },
+            "deeptutor_api_endpoint": "http://localhost:8001",
+            "deeptutor_user": "admin",
+            "deeptutor_password": "admin123",
             "memory": asdict(MemoryConfig()),
             "knowledge": asdict(KnowledgeConfig()),
             "partner": asdict(PartnerConfig())
         }
-    
+
     def _save_main_config(self):
         """保存主配置"""
         try:
@@ -138,7 +176,7 @@ class Config:
                 json.dump(self._config, f, ensure_ascii=False, indent=2)
         except Exception as e:
             logger.error(f"[Config] Failed to save main config: {e}")
-    
+
     def _load_models_config(self):
         """加载模型配置"""
         if self.models_config_file.exists():
@@ -155,7 +193,7 @@ class Config:
         else:
             self._models = {"default": ModelConfig()}
             self._save_models_config()
-    
+
     def _save_models_config(self):
         """保存模型配置"""
         try:
@@ -167,7 +205,7 @@ class Config:
                 json.dump(data, f, ensure_ascii=False, indent=2)
         except Exception as e:
             logger.error(f"[Config] Failed to save models config: {e}")
-    
+
     def _load_ui_config(self):
         """加载UI配置"""
         if self.ui_config_file.exists():
@@ -181,7 +219,7 @@ class Config:
         else:
             self._ui = UIConfig()
             self._save_ui_config()
-    
+
     def _save_ui_config(self):
         """保存UI配置"""
         try:
@@ -189,70 +227,70 @@ class Config:
                 json.dump(asdict(self._ui), f, ensure_ascii=False, indent=2)
         except Exception as e:
             logger.error(f"[Config] Failed to save UI config: {e}")
-    
+
     # 公共方法
     def get(self, key: str, default: Any = None) -> Any:
         """获取配置项"""
         return self._config.get(key, default)
-    
+
     def set(self, key: str, value: Any):
         """设置配置项"""
         self._config[key] = value
         self._save_main_config()
-    
+
     def get_model_config(self, name: str = "default") -> ModelConfig:
         """获取模型配置"""
         return self._models.get(name, ModelConfig())
-    
+
     def set_model_config(self, name: str, config: ModelConfig):
         """设置模型配置"""
         self._models[name] = config
         self._save_models_config()
-    
+
     def get_memory_config(self) -> MemoryConfig:
         """获取记忆配置"""
         if self._memory is None:
             data = self._config.get("memory", {})
             self._memory = MemoryConfig(**data)
         return self._memory
-    
+
     def get_knowledge_config(self) -> KnowledgeConfig:
         """获取知识库配置"""
         if self._knowledge is None:
             data = self._config.get("knowledge", {})
             self._knowledge = KnowledgeConfig(**data)
         return self._knowledge
-    
+
     def get_partner_config(self) -> PartnerConfig:
         """获取伙伴配置"""
         if self._partner is None:
             data = self._config.get("partner", {})
             self._partner = PartnerConfig(**data)
         return self._partner
-    
+
     def get_ui_config(self) -> UIConfig:
         """获取UI配置"""
         return self._ui
-    
+
     def update_ui_config(self, **kwargs):
         """更新UI配置"""
         for key, value in kwargs.items():
             if hasattr(self._ui, key):
                 setattr(self._ui, key, value)
         self._save_ui_config()
-    
+
     def is_feature_enabled(self, feature: str) -> bool:
         """检查功能是否启用"""
         features = self._config.get("features", {})
         return features.get(feature, True)
-    
+
     def enable_feature(self, feature: str):
         """启用功能"""
         if "features" not in self._config:
             self._config["features"] = {}
         self._config["features"][feature] = True
         self._save_main_config()
-    
+
     def disable_feature(self, feature: str):
         """禁用功能"""
         if "features" not in self._config:

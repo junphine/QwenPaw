@@ -1,8 +1,8 @@
 {
   "id": "app-home",
   "name": "应用首页",
-  "version": "0.3.0",
-  "description": "QwenPaw 应用仪表盘首页：集中展示已安装应用卡片、系统概览（主机/OS/Python 版本/运行时长/插件数）、Agent 列表、常用工具入口、定时任务速览、Token 用量趋势。数据经插件后端聚合，纯只读。应用启动入口：应用 → 应用首页 🏠",
+  "version": "0.4.0",
+  "description": "QwenPaw 应用仪表盘首页：集中展示已安装应用卡片、系统概览、Agent 列表、常用工具入口，并支持创建/管理轻应用（name + url）在首页展示。数据经插件后端聚合，纯只读（轻应用除外）。应用启动入口：应用 → 应用首页 🏠",
   "author": "CC",
   "license": "Apache-2.0",
   "type": "app",

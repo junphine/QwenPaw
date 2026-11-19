@@ -78,6 +78,11 @@ npm run preview
 - httpx>=0.27.0
 - numpy>=1.24.0
 
+### deeptutor client 生成
+```
+curl http://localhost:8001/openapi.json > deeptutor.openapi.json
+openapi-python-client generate --path deeptutor.openapi.json --config generate.yaml  --overwrite
+```
 ## 插件安装
 
 1. 确保 QwenPaw 处于离线状态
@@ -90,6 +95,16 @@ npm run preview
    qwenpaw plugin install ./daydayup
    ```
 4. 重启 QwenPaw 启用插件
+
+## Daydayup Memory Tool Plugin
+
+A QwenPaw 2.0 tool plugin that exposes the Daydayup memory service functions as agent-callable tools.
+
+## Tools Provided
+
+1. **save_memory** - Save a memory to the Daydayup memory system
+2. **search_memories** - Search memories in the Daydayup memory system
+3. **get_memory_stats** - Get statistics about the Daydayup memory system
 
 ## 技术细节
 

@@ -5,11 +5,11 @@
 
 import logging
 import asyncio
+import os
+import importlib.util
 from pathlib import Path
 from typing import Optional, Dict, Any, List
-from fastapi import APIRouter, FastAPI
-from contextlib import asynccontextmanager
-
+from qwenpaw.plugins.api import PluginApi
 from .config import Config
 from .events import EventManager
 from .app import Application
@@ -26,6 +26,7 @@ from ..services.book_service import BookService
 
 # 导入 API
 from ..api.router import create_api_router
+
 
 logger = logging.getLogger("daydayup")
 
@@ -45,11 +46,12 @@ class DaydayupPlugin:
     8. Knowledge Center - 知识中心
     """
     
-    def __init__(self):
+    def __init__(self,tools_plugins=[]):
         self.name = "趣学习"
         self.version = "2.0.0"
         self.id = "daydayup"
         self.description = "AI学习陪伴助手 - 基于 Deep Tutor 架构"
+        self.tools_plugins = tools_plugins
         
         # 数据目录
         self.data_dir = Path.home() / ".qwenpaw" / "daydayup_data"
@@ -90,7 +92,7 @@ class DaydayupPlugin:
         
         logger.info(f"[{self.id}] Services initialized: {list(self.services.keys())}")
     
-    def register(self, api) -> Optional[Application]:
+    def register(self, api: PluginApi) -> Optional[Application]:
         """
         注册插件到 QwenPaw
         
@@ -146,6 +148,10 @@ class DaydayupPlugin:
             
             logger.info(f"[{self.id}] Plugin registered successfully")
             logger.info(f"[{self.id}] Data directory: {self.data_dir}")
+
+            for tool in self.tools_plugins:
+                tool.parent = self
+                tool.register(api)
             
             return self.app
             
@@ -253,6 +259,3 @@ class DaydayupPlugin:
         """获取事件管理器"""
         return self.events
 
-
-# 模块级实例
-plugin = DaydayupPlugin()

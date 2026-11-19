@@ -18,7 +18,7 @@
   ],
   "qwenpaw_version": {
     "min": "2.2.0",
-    "max": "2.3.0"
+    "max": "2.4.0"
   },
   "pack_exclude": [
     "frontend/node_modules",
