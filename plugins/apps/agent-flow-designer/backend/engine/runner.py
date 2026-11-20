@@ -722,10 +722,9 @@ class WorkflowRunner:
             if nid in self._sched.executed:
                 continue
             self.state.node_status[nid] = "skipped"
-            # disbale@byron
-            #trace = _skipped_trace(node, nid, skip_reason)
-            #self.state.trace_items.append(trace)
-            #yield RunEvent(EventType.NODE_DONE, nid, {"trace": trace})
+            trace = _skipped_trace(node, nid, skip_reason)
+            self.state.trace_items.append(trace)
+            yield RunEvent(EventType.NODE_DONE, nid, {"trace": trace})
 
     async def _abort(
         self,

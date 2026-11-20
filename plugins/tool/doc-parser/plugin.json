@@ -1,0 +1,88 @@
+{
+  "id": "doc-parser-tool",
+  "name": "Doc Parser Tool",
+  "version": "1.0.0",
+  "description": "Generate md file from document using Mineru or Docling models",
+  "author": "PharmaBlock Team",
+  "entry": {
+    "backend": "doc_parser_plugin.py"
+  },
+  "type": "tool",
+  "dependencies": ["httpx>=0.24.0"],
+  "qwenpaw_version": {
+    "min": "2.0.0",
+    "max": "2.9.0"
+  },
+  "meta": {
+    "tools": [
+      {
+        "name": "mineru_parse",
+        "description": "Generate md file from document(pdf,docx,pptx,excel) using Mineru model",
+        "icon": "🖼️",
+        "requires_config": true,
+        "config_fields": [
+          {
+            "name": "api_key",
+            "label": "Mineru API Key",
+            "type": "password",
+            "required": false,
+            "placeholder": "sk-...",
+            "help": "Get your API key from Mineru Serve"
+          },
+          {
+            "name": "endpoint",
+            "label": "API Endpoint",
+            "type": "text",
+            "required": false,
+            "placeholder": "http://8.145.35.112:8003",
+            "help": "See: https://opendatalab.github.io/MinerU/zh/"
+          },
+          {
+            "name": "timeout",
+            "label": "Request Timeout (seconds)",
+            "type": "number",
+            "required": false,
+            "placeholder": "120",
+            "min": 30,
+            "max": 600,
+            "help": "HTTP request timeout in seconds (default: 120)"
+          }
+        ]
+      },
+      {
+        "name": "docling_parse",
+        "description": "Generate md file from document(pdf,docx,pptx,excel) using Docling model",
+        "icon": "🖼️",
+        "requires_config": true,
+        "config_fields": [
+          {
+            "name": "api_key",
+            "label": "Docling Serve API Key",
+            "type": "password",
+            "required": false,
+            "placeholder": "sk-...",
+            "help": "Get your API key from Docling Serve"
+          },
+          {
+            "name": "endpoint",
+            "label": "API Endpoint",
+            "type": "text",
+            "required": false,
+            "placeholder": "http://localhost:5001",
+            "help": "See: https://docling-project.github.io/docling/usage/api_server/"
+          },
+          {
+            "name": "timeout",
+            "label": "Request Timeout (seconds)",
+            "type": "number",
+            "required": false,
+            "placeholder": "120",
+            "min": 30,
+            "max": 600,
+            "help": "HTTP request timeout in seconds (default: 120)"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1539,7 +1539,7 @@ async def update_workflow(
             for key in _SERVER_OWNED_KEYS:
                 record[key] = wf.get(key)
 
-            _persist_to_disk(wf)
+            _persist_to_disk(record)
             return {"success": True, "data": record}
 
     raise HTTPException(status_code=404, detail="Workflow not found")
@@ -3402,12 +3402,13 @@ async def _invoke_platform_tool(
             f"可选工具：{available or '（无）'}"
         )
 
+    tool._qp_raw_params = params          # noqa: SLF001  (spec §4.2 集中耦合)
+
     governor = getattr(tool, "_qp_governor", None)
     if governor is None:
-        raise RuntimeError(
-            f"治理层不可用，工具「{tool_name}」已按 fail-closed 策略拒绝执行"
-        )
+        return _finish_tool_output(await tool(**params), output_format, parsed_out)
 
+    spec = tool._build_tc_spec()        # noqa: SLF001
     # 1) 非阻塞预分类：assert_policy 是同步纯函数，绝不会停在审批等待里。
     #
     # 预分类必须与闸门用同一个**有效级别**，否则第 2 步的 fail-closed 只是把
@@ -3423,8 +3424,7 @@ async def _invoke_platform_tool(
     effective_level = ToolExecutionLevel.from_config(
         getattr(services.get("agent_config"), "approval_level", None)
     )
-    tool._qp_raw_params = params          # noqa: SLF001  (spec §4.2 集中耦合)
-    spec = tool._build_tc_spec()          # noqa: SLF001
+
     previous_level = governor.policy.execution_level
     governor.policy.execution_level = effective_level.value
     try:
@@ -5032,3 +5032,9 @@ async def get_execution_detail(
     run["nodes"] = await asyncio.to_thread(_list_run_nodes, execution_id, owner)
     return {"success": True, "data": run}
 
+# ── PawApp instance ─────────────────────────────────────────────────
+app = PawApp("Agent Flow Designer", app_id="agent-flow-designer")
+app.include_router(router)
+
+# The 'plugin' variable is what PluginLoader looks for.
+plugin = app

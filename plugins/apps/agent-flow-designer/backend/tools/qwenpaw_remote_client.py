@@ -73,6 +73,7 @@ def guess_image_mime(file_path: Path) -> str:
     """根据文件扩展名推断图片的 MIME 类型"""
     return image_mime_mapping.get(file_path.suffix.lower(), "image/jpeg")
 
+
 class QwenPawRemoteClient:
     """通用QwenPaw Http连接器
 
@@ -527,7 +528,7 @@ class QwenPawRemoteClient:
                     "success": False
                 })
 
-        if len(files)<=1:
+        if len(files)<=1 and result is not None:
             return result
 
         # 打印统计

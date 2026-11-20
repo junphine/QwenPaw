@@ -46,12 +46,12 @@ class DaydayupPlugin:
     8. Knowledge Center - 知识中心
     """
     
-    def __init__(self,tools_plugins=[]):
+    def __init__(self, tools_plugins=None):
         self.name = "趣学习"
         self.version = "2.0.0"
         self.id = "daydayup"
         self.description = "AI学习陪伴助手 - 基于 Deep Tutor 架构"
-        self.tools_plugins = tools_plugins
+        self.tools_plugins = tools_plugins or []
         
         # 数据目录
         self.data_dir = Path.home() / ".qwenpaw" / "daydayup_data"

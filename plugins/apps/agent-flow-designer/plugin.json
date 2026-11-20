@@ -15,7 +15,7 @@
   "author": "Agent Flow Designer Team",
   "type": "app",
   "entry": {
-    "backend": "backend/plugin.py",
+    "backend": "backend/main.py",
     "frontend": "ui/plugin-entry.js"
   },
   "qwenpaw_version": {
