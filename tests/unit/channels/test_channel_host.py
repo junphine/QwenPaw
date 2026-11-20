@@ -43,6 +43,46 @@ def _runtime_identity():
     }
 
 
+@pytest.mark.asyncio
+async def test_drain_timeout_retains_tracked_work_and_reports_stage(caplog):
+    from types import SimpleNamespace
+    from qwenpaw.app.channels.manager import ChannelManager
+    from qwenpaw.app.task_tracker import TaskTracker
+
+    tracker, release = TaskTracker(), asyncio.Event()
+    workspace = SimpleNamespace(task_tracker=tracker)
+    channel = SimpleNamespace(channel="wechat", set_enqueue=lambda _: None)
+    manager = ChannelManager([channel])
+    manager._workspace = workspace
+
+    async def stream(_):
+        await release.wait()
+        yield "data: done\n\n"
+
+    await tracker.attach_or_start(
+        "cron",
+        None,
+        stream,
+        owner=workspace,
+        channel_id="wechat",
+        channel_handoff_safe=True,
+    )
+    try:
+        # Transferability applies only to reload. An ordinary drain still
+        # waits without cancelling the producer or discarding its owner.
+        assert not await manager.quiesce(timeout=0.01)
+        assert await tracker.get_status("cron") == "running"
+        assert manager.channels == [channel]
+        assert any(
+            "stage=tracker" in r.getMessage() and "pending=1" in r.getMessage()
+            for r in caplog.records
+        )
+    finally:
+        release.set()
+        await tracker.wait_all_done(1)
+    assert await manager.quiesce(timeout=0.01)
+
+
 @pytest_asyncio.fixture
 async def host(tmp_path, monkeypatch):
     case = await Host.create(tmp_path, monkeypatch)
@@ -1050,6 +1090,7 @@ async def test_local_install_enable_uses_installed_code_and_offline_dependency(
 ):
     from qwenpaw.config.utils import load_config
     from qwenpaw.plugins.settings import persist_plugin_settings
+    from qwenpaw.plugins.loader import PluginLoader
 
     ws = await host.workspace("first", use_sdk=True)
     source = host.artifact(sdk=True)
@@ -1057,18 +1098,17 @@ async def test_local_install_enable_uses_installed_code_and_offline_dependency(
     local_certifi_wheel(wheels)
     calls = []
 
-    def offline(command, *, timeout, plugin_id):
+    def offline(command, *, timeout, plugin_id, cancel=None):
         calls.append(command)
         assert (
             command[1:6] == ["-I", "-B", "-m", "pip", "wheel"]
             and plugin_id == KEY
         )
-        return subprocess.run(
+        return PluginLoader._run_subprocess_with_streaming_log(
             [*command, "--no-index", "--find-links", str(wheels)],
-            capture_output=True,
-            text=True,
-            check=False,
             timeout=timeout,
+            plugin_id=plugin_id,
+            cancel=cancel,
         )
 
     monkeypatch.setattr(
