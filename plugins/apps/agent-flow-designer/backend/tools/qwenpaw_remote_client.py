@@ -398,17 +398,24 @@ class QwenPawRemoteClient:
 
         map_instructions = (
             "你需要基于<question>的指令对<attachment>或者<document>的内容进行处理。\n"
-            "请先根据任务需求，判断这些内容是否包含任务的相关信息或者线索，如果存在以markword或者json格式输出相关信息。\n"
+            "请先根据任务需求，判断这些内容是否包含任务的相关信息或者线索，如果存在以markword或者json格式输出相关信息。\n" if len(files)>1 else ""
             "如果任务中提供了一个skill调用需求（形如:/skill_name），则把输入附件或者文档作为skill的处理对象，输出skill处理的结果。\n"
         )
-        system_conversation = [{"type": "text", "text": map_instructions},
-                               *prompt,
-                               ]
+        system_conversation = [
+            {"type": "text", "text": map_instructions},
+            *prompt,
+        ]
 
-        reduce_instructions = (
-            "请根据各个文件的摘要信息，回答用户的问题<question>。\n"
-            "如果任务中提供了一个skill调用需求（形如:/skill_name），则后面的摘要信息已经是skill的处理结果。\n"
-        )
+        if only_path:
+            reduce_instructions = (
+                "请根据用户提供的文件路径信息，使用合适的工具或代码来解析文件内容，然后回答用户的问题<question>。\n"
+                "如果任务中提供了一个skill调用需求（形如:/skill_name），则后面的摘要信息已经是skill的处理结果。\n"
+            )
+        else:
+            reduce_instructions = (
+                "请根据各个文件的摘要信息，回答用户的问题<question>。\n"
+                "如果任务中提供了一个skill调用需求（形如:/skill_name），则后面的摘要信息已经是skill的处理结果。\n"
+            )
         user_prompt = [{"type": "text", "text": reduce_instructions},
                        *prompt,
                        ]
@@ -540,7 +547,6 @@ class QwenPawRemoteClient:
         print(f"失败：{stats['failed_count']}")
         print(f"输出目录：{output_dir}")
         print("=" * 70)
-        result['content'] = stats
 
         user_prompt.append({
             "type":"text",

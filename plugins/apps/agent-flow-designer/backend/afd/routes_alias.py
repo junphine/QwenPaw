@@ -206,7 +206,7 @@ def execute_qwenpaw_client_block(
     if True:
         system_prompt = [{"type":"text","text":'你是一个专业的文档解析处理专家'}]
 
-    cwd = Path(f'~/qwenpaw/workspaces/{agent_id}/media/{username}')
+    cwd = Path(f'~/qwenpaw/workspaces/{agent_id}/media/{username}').expanduser()
     qwenpaw_client = QwenPawRemoteClient(agent_id=agent_id,username=username)
     prompt_msgs = []
     images = []

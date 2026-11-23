@@ -59,7 +59,7 @@ def register_tools(mcp_server: Any, container: DependencyContainer) -> None:
         username = account_code
         system_prompt = []
 
-        cwd = Path(f'~/qwenpaw/workspaces/{agent_id}/media/{username}')
+        cwd = Path(f'~/qwenpaw/workspaces/{agent_id}/media/{username}').expanduser()
 
         _qwenpaw_client = _qwenpaw_client_cache.get(username)
         if _qwenpaw_client is None:
@@ -74,7 +74,7 @@ def register_tools(mcp_server: Any, container: DependencyContainer) -> None:
                 images.append(file)
 
         if images:
-            system_prompt = [{"type":"text","text":'你是一个专业的文档解析处理专家'}]
+            system_prompt = [{"type":"text","text":f'你是一个专业的文档解析与分析处理专家,你只能访问{cwd}文件夹来处理用户的问题。'}]
 
         if images: # read images content
             qwenpaw_result = _qwenpaw_client.process_directory(prompt_msgs,images,cwd,system_prompt=system_prompt,session_id=sid,only_path=only_path)
