@@ -10,8 +10,8 @@ import requests
 import time
 import uuid
 from pathlib import Path
-from pydantic import BaseModel, Field
 from typing import Any, Dict, List, Optional
+from ..afd.models import ChatAttachment,ChatMessage,ExecuteRequest
 from ..di import DependencyContainer
 
 logger = logging.getLogger(__name__)
@@ -19,32 +19,6 @@ logger = logging.getLogger(__name__)
 _BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 _qwenpaw_client_cache = {}
-
-class ChatAttachment(BaseModel):
-    url: str
-    name: str
-    type: str = ""
-    size: int = 0
-
-class ChatMessage(BaseModel):
-    role: str
-    content: str
-    attachments: list[ChatAttachment] = Field(default_factory=list)
-
-
-class ExecuteRequest(BaseModel):
-    workflow_id: str = ""
-    messages: list[ChatMessage]
-    stream: bool = True
-    # ── Caller-supplied execution variables ─────────────────────────
-    # ``user_id`` / ``agent_id`` are *not* accepted here: they are bound to the
-    # authenticated principal by ``get_scoped_ctx`` so a run can never claim
-    # another user's identity through the request body.
-    conversation_id: str = ""
-    user_uid: str = ""
-    user_name: str = ""
-    lang: str = ""
-
 
 def register_tools(mcp_server: Any, container: DependencyContainer) -> None:
     """Register all MCP tools with dependency injection.

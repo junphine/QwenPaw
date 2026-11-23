@@ -5,6 +5,19 @@
 需要升次版本时，先在 `plugin.json` 写定目标版本，打包时跳过自增。
 格式参考 [Keep a Changelog](https://keepachangelog.com/)：`新增 / 修复 / 变更`。
 
+## [2.7.1] - 2026-11-20
+
+### 变更
+- 工程债 #17：backend/main.py（5073 行）拆分为 backend/afd/ 包九模块
+  （models / store / llm_client / routing / tools / nodes / validation /
+  routes_workflows / routes_executions），main.py 仅保留装配（37 行）。
+  引擎 + 节点 handlers 可脱离 web 层独立 import 执行（新增解耦子进程测试）。
+- 测试 import 与 monkeypatch 同步改指向属主/调用方模块，不留 re-export 门面。
+- 版本号向前对齐（此前 plugin.json 2.6.9 落后于 CHANGELOG [2.7.0]）。
+
+### 验证
+- 后端 430 例全绿（含 2 例解耦测试）；前端 49 例绿；build 通过。
+
 ## [2.7.0] - 2026-11-17
 
 > E1：自定义节点类型注册表。后端注册表扩展为 `(handler, metadata)` 存储结构，
