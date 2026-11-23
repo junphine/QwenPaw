@@ -7,7 +7,7 @@ from mcp.server.fastmcp import FastMCP
 
 from .logging_bootstrap import get_logger, update_log_levels
 from .di import get_container
-from .main import _read_all
+from .afd.store import _read_all
 
 # Create server instance
 mcp = FastMCP("qwenpaw")

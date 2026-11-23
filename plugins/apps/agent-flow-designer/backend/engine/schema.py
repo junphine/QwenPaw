@@ -204,7 +204,7 @@ def parse_json_output(text: str) -> Tuple[Any, bool]:
 
 SYSTEM_VARIABLE_KEYS: Tuple[str, ...] = (
     "SYS_USER_ID", "USER_UID", "USER_NAME", "USER_LANG",
-    "AGENT_ID", "CONVERSATION_ID", "REQUEST_ID", "AGENT_USER_MSG",
+    "AGENT_ID", "CONVERSATION_ID", "REQUEST_ID"
 )
 
 #: The four names _lookup_node_output accepts for a scalar output. They all
@@ -218,6 +218,7 @@ _SCALAR_ALIASES: Tuple[Tuple[str, str], ...] = (
 NODE_OUTPUT_CONTRACT = {
     "start": (
         ("user_input", "string"),
+        ("user_attachments", "array"),
         ("messages", "array"),
         ("messages_count", "integer"),
     ) + tuple((key, "string") for key in SYSTEM_VARIABLE_KEYS),

@@ -82,6 +82,8 @@ npm run preview
 ```
 curl http://localhost:8001/openapi.json > deeptutor.openapi.json
 openapi-python-client generate --path deeptutor.openapi.json --config generate.yaml  --overwrite
+cd deep-tutor-api-client
+pip install -e .
 ```
 ## 插件安装
 

@@ -105,10 +105,15 @@ def _build_execution_context(
     identity by crafting a payload.
     """
     user_input = req.messages[-1].content if req.messages else ""
+    attachments = req.messages[-1].attachments if req.messages else []
+    files = []
+    for file in attachments:
+        files.append(file.url)
     principal = str(getattr(ctx, "user_id", "") or "default")
     return {
         "messages": [m.model_dump() for m in req.messages],
         "user_input": user_input,
+        "user_attachments": files,
         "SYS_USER_ID": principal,
         "USER_UID": req.user_uid or principal,
         "USER_NAME": req.user_name or principal,
@@ -116,7 +121,6 @@ def _build_execution_context(
         "AGENT_ID": str(getattr(ctx, "agent_id", "") or "default"),
         "CONVERSATION_ID": req.conversation_id,
         "REQUEST_ID": str(uuid.uuid4()),
-        "AGENT_USER_MSG": user_input,
     }
 
 

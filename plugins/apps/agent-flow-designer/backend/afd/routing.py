@@ -505,13 +505,25 @@ def _eval_router_condition(
     target_value = cond.get("value", "")
 
     variable_value, defined = _resolve_variable_ex(variable_name, context, node_outputs)
-    cond_matched, detail = _evaluate_condition(
-        variable_value, operator, target_value,
-        node_outputs=node_outputs,
-        node_outputs_history=node_outputs_history,
-        condition=cond,
-        defined=defined,
-    )
+    if isinstance(variable_value,list):
+        for variable_value_item in variable_value:
+            cond_matched, detail = _evaluate_condition(
+                variable_value_item, operator, target_value,
+                node_outputs=node_outputs,
+                node_outputs_history=node_outputs_history,
+                condition=cond,
+                defined=defined,
+            )
+            if cond_matched:
+                break
+    else:
+        cond_matched, detail = _evaluate_condition(
+            variable_value, operator, target_value,
+            node_outputs=node_outputs,
+            node_outputs_history=node_outputs_history,
+            condition=cond,
+            defined=defined,
+        )
     return cond_matched, {
         "variable": variable_name,
         "operator": operator,
