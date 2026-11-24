@@ -16,6 +16,7 @@ from ..di import DependencyContainer
 
 logger = logging.getLogger(__name__)
 
+_WORKING_DIR = Path(os.environ.get("QWENPAW_WORKING_DIR", Path.home() / ".qwenpaw")).expanduser().resolve()
 _BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 _qwenpaw_client_cache = {}
@@ -59,7 +60,7 @@ def register_tools(mcp_server: Any, container: DependencyContainer) -> None:
         username = account_code
         system_prompt = []
 
-        cwd = Path(f'~/qwenpaw/workspaces/{agent_id}/media/{username}').expanduser()
+        cwd = _WORKING_DIR / agent_id / f"media/{username}"
 
         _qwenpaw_client = _qwenpaw_client_cache.get(username)
         if _qwenpaw_client is None:
