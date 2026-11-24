@@ -4,13 +4,15 @@ import os
 from typing import Any, Dict, Optional, Tuple
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 from .logging_bootstrap import get_logger, update_log_levels
 from .di import get_container
 from .afd.store import _read_all
 
 # Create server instance
-mcp = FastMCP("qwenpaw")
+security = TransportSecuritySettings(enable_dns_rebinding_protection=False)
+mcp = FastMCP("qwenpaw",transport_security=security)
 
 # Set up logger
 logger = get_logger(__name__)
@@ -70,6 +72,7 @@ def main() -> None:
     mcp.settings.host = host
     mcp.settings.port = port
     logger.info("Serving qwen-paw MCP server over SSE at http://%s:%d/mcp", host, port)
+
     mcp.run(transport='streamable-http')
 
 

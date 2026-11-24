@@ -5,6 +5,7 @@ import importlib.util
 import logging
 import os
 from pathlib import Path
+from typing import List, Dict, Any
 from qwenpaw.plugins.api import PluginApi
 from agentscope.message import DataBlock, TextBlock, URLSource
 from agentscope.message import ToolResultState
@@ -18,74 +19,85 @@ logger = logging.getLogger(__name__)
 _PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
-def mineru_parse(soure_path:str)-> ToolChunk:
-    """Generate md file from document(pdf,docx,pptx,excel,etc) using MinerU model
+def mineru_parse(sources_path:List[str])-> ToolChunk:
+    """Generate md files from documents(pdf,docx,pptx,excel,etc) using MinerU model
 
     Args:
-        soure_path: The input document path to convert
+        sources_path: The input documents path to convert
     Returns:
-        ToolChunk with the md file path in result
+        ToolChunk with the md files path in result
     """
     from .mineru import config
     from .mineru import mineru_client
     mineru_config = config.resolve_mineru_config()
     uid = get_current_user_id() or 'default'
     output_base = DEFAULT_MEDIA_DIR / uid
-    output_md_path = mineru_client.parse_remote(Path(soure_path),output_base,mineru_config)
+    output_md_path = mineru_client.parse_remote(sources_path,output_base,mineru_config)
+    content=[
+        TextBlock(
+            type="text",
+            text=(
+                f"Generated md file using mineru\n"
+                f"From: {sources_path}\n"
+                f"Saved to: {output_md_path}\n"
+            ),
+        ),
+    ]
+    for output in output_md_path:
+        data = DataBlock(
+            source=URLSource(
+                url="file://" + str(output),
+                media_type="text/markdown",
+            ),
+        )
+        content.append(data)
+
     # Return path with local file path
     return ToolChunk(
         state=ToolResultState.SUCCESS,
-        content=[
-            DataBlock(
-                source=URLSource(
-                    url="file://" + str(output_md_path),
-                    media_type="text/markdown",
-                ),
-            ),
-            TextBlock(
-                type="text",
-                text=(
-                    f"Generated md file using mineru\n"                    
-                    f"From: {soure_path}\n"
-                    f"Saved to: {output_md_path}\n"
-                ),
-            ),
-        ],
+        content=content
     )
 
-def docling_parse(soure_path:str)-> ToolChunk:
-    """Generate md file from document(pdf,docx,pptx,excel,etc) using Docling model
+def docling_parse(sources_path:List[str])-> ToolChunk:
+    """Generate md files from documents(pdf,docx,pptx,excel,etc) using Docling model
 
     Args:
-        soure_path: The input document path to convert
+        sources_path: The input documents path to convert
     Returns:
-        ToolChunk with the md file path in result
+        ToolChunk with the md files path in result
     """
     from .docling import config
     from .docling import remote
     docling_config = config.resolve_docling_config()
     uid = get_current_user_id() or 'default'
     output_base = DEFAULT_MEDIA_DIR / uid
-    output_md_path = remote.parse_remote(Path(soure_path),output_base,docling_config)
+    output_md_path = []
+    for source_path in sources_path:
+        md_path = remote.parse_remote(Path(source_path),output_base,docling_config)
+        output_md_path.append(md_path)
+    content=[
+        TextBlock(
+            type="text",
+            text=(
+                f"Generated md file using docling\n"
+                f"From: {sources_path}\n"
+                f"Saved to: {output_md_path}\n"
+            ),
+        ),
+    ]
+    for output in output_md_path:
+        data = DataBlock(
+            source=URLSource(
+                url="file://" + str(output),
+                media_type="text/markdown",
+            ),
+        )
+        content.append(data)
+
     # Return path with local file path
     return ToolChunk(
         state=ToolResultState.SUCCESS,
-        content=[
-            DataBlock(
-                source=URLSource(
-                    url="file://" + str(output_md_path),
-                    media_type="text/markdown",
-                ),
-            ),
-            TextBlock(
-                type="text",
-                text=(
-                    f"Generated md file using mineru\n"
-                    f"From: {soure_path}\n"
-                    f"Saved to: {output_md_path}\n"
-                ),
-            ),
-        ],
+        content=content
     )
 
 
@@ -104,9 +116,7 @@ class DocParserToolPlugin:
         api.register_tool(
             tool_name="mineru_parse",
             tool_func=mineru_parse,
-            description=(
-                "Generate md file from document(pdf,docx,pptx,excel,etc) using MinerU model"
-            ),
+            description=mineru_parse.__doc__,
             icon="✏️",
             tool_type="network",
         )
@@ -114,7 +124,7 @@ class DocParserToolPlugin:
         api.register_tool(
             tool_name="docling_parse",
             tool_func=docling_parse,
-            description="Generate md file from document(pdf,docx,pptx,excel,etc) using Docling model",
+            description=docling_parse.__doc__,
             icon="✏️",
             tool_type="network",
         )

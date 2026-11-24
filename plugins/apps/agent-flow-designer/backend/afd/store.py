@@ -21,21 +21,16 @@ from engine.paused_db import get_paused_run, init_db as _init_paused_db
 from engine.run_db import init_db as _init_run_db
 
 logger = get_logger(__name__)
-
+_WORKING_DIR = Path(os.environ.get("QWENPAW_WORKING_DIR", Path.home() / ".qwenpaw"))
 
 def _resolve_plugin_data_dir() -> Path:
     """Resolve the plugin data directory in the platform data space.
 
     Priority:
-    1. QWENPAW_HOME env var → <QWENPAW_HOME>/agent-flow-data/
-    2. Fall back to ~/~/.qwenpaw/agent-flow-data/
+    1. QWENPAW_WORKING_DIR env var → <QWENPAW_WORKING_DIR>/agent-flow-data/
+    2. Fall back to ~/.qwenpaw/agent-flow-data/
     """
-    qzagent_home = os.environ.get("QWENPAW_HOME")
-    if qzagent_home:
-        base = Path(qzagent_home)
-    else:
-        base = Path("~/.qwenpaw").expanduser()
-    return base / "agent-flow-data"
+    return _WORKING_DIR / "agent-flow-data"
 
 
 # Legacy data path (kept for migration). This module sits one level

@@ -33,7 +33,7 @@ def register_tools(mcp_server: Any, container: DependencyContainer) -> None:
 
     from .qwenpaw_remote_client import QwenPawRemoteClient
 
-    @mcp_server.tool(title='远程执行QwenPaw的Agent进行文件分析')
+    @mcp_server.tool(title='通过远程调用QwenPaw的文件分析Agent进行用户附件的解析和分析')
     def execute_qwenpaw_doc_parser_agent(
         query: str ,
         account_code: str = '',
@@ -41,13 +41,13 @@ def register_tools(mcp_server: Any, container: DependencyContainer) -> None:
         attachments: List[str] = None,
         agent_id: str = 'doc_parser',
     )-> Dict[str, Any]:
-        """Run a agent query on project files.
+        """Run a file agent query on user attachments files.
 
         Args:
             query: user input query string
-            account_code: user account_code
+            account_code: user account code
             conversation_id: Optional specific conversation_id to identity session
-            attachments: Optional specific file to query
+            attachments: Optional specific file url to query
             agent_id: which agent to use,use default for file parse
 
         Returns:
@@ -74,7 +74,7 @@ def register_tools(mcp_server: Any, container: DependencyContainer) -> None:
                 images.append(file)
 
         if images:
-            system_prompt = [{"type":"text","text":f'你是一个专业的文档解析与分析处理专家,你只能访问{cwd}文件夹来处理用户的问题。'}]
+            system_prompt = [{"type":"text","text":f'你是一个专业的文档解析与分析处理专家,你只能访问用户输入文件**{images}**和输出目录**{cwd}**来回答用户的问题。默认将答案以markdown格式（支持mermaid图表）输出给用户。'}]
 
         if images: # read images content
             qwenpaw_result = _qwenpaw_client.process_directory(prompt_msgs,images,cwd,system_prompt=system_prompt,session_id=sid,only_path=only_path)

@@ -296,7 +296,7 @@ def verify_service(config: MinerUConfig):
 
 
 def parse_remote(
-        source_path: Path,
+        sources_path: List[Path|str],
         output_base: Path,
         config: MinerUConfig,
         *,
@@ -317,11 +317,6 @@ def parse_remote(
             "MinerU cloud mode is selected but no API token is configured. "
             "Add a token in Settings → MinerU, or switch to local mode."
         )
-    source_path = Path(source_path)
-    if not source_path.is_file():
-        raise MinerUError(f"Input file not found: {source_path}")
-    if source_path.suffix.lower() not in MINERU_SUPPORTED_FORMATS:
-        raise MinerUError(f"Unsupported MinerU cloud input format: {source_path.suffix or 'none'}")
 
     def report(message: str) -> None:
         if on_progress is None:
@@ -331,27 +326,34 @@ def parse_remote(
         except Exception:
             logger.debug("on_progress callback failed", exc_info=True)
 
+    page_count = None
+    for source_path in sources_path:
+        source_path = Path(source_path)
+        if not source_path.is_file():
+            raise MinerUError(f"Input file not found: {source_path}")
+        if source_path.suffix.lower() not in MINERU_SUPPORTED_FORMATS:
+            raise MinerUError(f"Unsupported MinerU cloud input format: {source_path.suffix or 'none'}")
+
+        size_mb = source_path.stat().st_size / (1024 * 1024)
+        report(f"MinerU cloud: uploading {source_path.name} ({size_mb:.1f} MB)")
+
+        if source_path.suffix.lower() in MINERU_PDF_FORMATS:
+            page_count = _pdf_page_count(source_path)
+            if page_count is not None and page_count >= config.max_pages_per_part:
+                total = page_count // config.max_pages_per_part
+                report(
+                    f"MinerU cloud: {source_path.name} has {page_count} pages, exceeding the "
+                    f"{config.max_pages_per_part}-page per-file limit; auto-splitting into "
+                    f"{total} part(s)"
+                )
+                page_count = config.max_pages_per_part
+
+
     base_url = config.api_base_url.rstrip("/")
     key_pool = KeyPool(config.api_keys)
     lang_list = []
     if config.api_language:
         lang_list.append(config.api_language)
-
-    page_count = None
-
-    size_mb = source_path.stat().st_size / (1024 * 1024)
-    report(f"MinerU cloud: uploading {source_path.name} ({size_mb:.1f} MB)")
-
-    if source_path.suffix.lower() in MINERU_PDF_FORMATS:
-        page_count = _pdf_page_count(source_path)
-        if page_count is not None and page_count >= config.max_pages_per_part:
-            total = page_count // config.max_pages_per_part
-            report(
-                f"MinerU cloud: {source_path.name} has {page_count} pages, exceeding the "
-                f"{config.max_pages_per_part}-page per-file limit; auto-splitting into "
-                f"{total} part(s)"
-            )
-            page_count = config.max_pages_per_part
 
 
     client = MinerUClientLocal(
@@ -364,17 +366,19 @@ def parse_remote(
         end_page_id =page_count
     )
 
-    report(f"MinerU cloud: requesting upload slot for {source_path.name}")
     archive_bytes = client.export_batch_markdown_bundle(
-        [source_path],
+        sources_path,
         output_base,
         timeout=timeout,
     )
 
+    output = []
     report("MinerU cloud: extracting archive")
-    working_dir = output_base / source_path.stem
-    logger.info("MinerU cloud parse complete: %s → %s", source_path.name, working_dir)
-    return working_dir / f'{source_path.stem}.md'
+    for source_path in sources_path:
+        working_dir = output_base / source_path.stem
+        report("MinerU cloud parse complete: %s → %s", source_path.name, working_dir)
+        output.append(working_dir / f'{source_path.stem}.md')
+    return output
 
 def _pdf_page_count(source_path: Path) -> int | None:
     """Number of pages in a PDF, or ``None`` when pypdf cannot read it (e.g. a

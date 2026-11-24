@@ -18,7 +18,7 @@ import logging
 from pathlib import Path
 
 import httpx
-
+from typing import List, Dict, Any
 from ..types import ParserError
 from .config import DoclingConfig
 

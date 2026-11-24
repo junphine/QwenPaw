@@ -231,7 +231,7 @@ async def _execute_agent_node(
 #: Fields the Start node always exposes — mirrors :func:`_get_node_inputs`, so a
 #: reference to one of these always resolves at run time.
 _START_OUTPUT_FIELDS = frozenset(
-    {"user_input", "messages", "messages_count"} | set(SYSTEM_VARIABLE_KEYS)
+    {"user_input", "user_attachments", "messages", "messages_count"} | set(SYSTEM_VARIABLE_KEYS)
 )
 
 
@@ -246,6 +246,7 @@ def _get_node_inputs(
     inputs: Dict[str, Any] = {}
     if node_type == "start":
         inputs["user_input"] = context.get("user_input", "")
+        inputs["user_attachments"] = context.get("user_attachments", [])
         inputs["messages_count"] = len(context.get("messages", []))
         for key in SYSTEM_VARIABLE_KEYS:
             inputs[key] = context.get(key, "")

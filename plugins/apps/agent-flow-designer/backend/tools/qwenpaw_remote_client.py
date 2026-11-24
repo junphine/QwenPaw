@@ -396,11 +396,17 @@ class QwenPawRemoteClient:
             if 'text' in user_msg:
                 user_msg['text'] = '<question>'+user_msg['text']+'</question>\n'
 
-        map_instructions = (
-            "你需要基于<question>的指令对<attachment>或者<document>的内容进行处理。\n"
-            "请先根据任务需求，判断这些内容是否包含任务的相关信息或者线索，如果存在以markword或者json格式输出相关信息。\n" if len(files)>1 else ""
-            "如果任务中提供了一个skill调用需求（形如:/skill_name），则把输入附件或者文档作为skill的处理对象，输出skill处理的结果。\n"
-        )
+        if len(files)>1:
+            map_instructions = (
+                "你需要基于<question>的指令对<attachment>或者<document>的内容进行处理。\n"
+                "请先根据任务需求，判断这些内容是否包含任务的相关信息或者线索，如果存在以markword或者json格式输出相关信息。\n"
+                "如果任务中提供了一个skill调用需求（形如:/skill_name），则把输入附件或者文档作为skill的处理对象，输出skill处理的结果。\n"
+            )
+        else:
+            map_instructions = (
+                "你需要基于<question>的指令对<attachment>或者<document>的内容进行处理。\n"               
+                "如果任务中提供了一个skill调用需求（形如:/skill_name），则把输入附件或者文档作为skill的处理对象，输出skill处理的结果。\n"
+            )
         system_conversation = [
             {"type": "text", "text": map_instructions},
             *prompt,
@@ -538,24 +544,25 @@ class QwenPawRemoteClient:
         if len(files)<=1 and result is not None:
             return result
 
-        # 打印统计
-        print("\n" + "=" * 70)
-        print("处理完成统计")
-        print("=" * 70)
-        print(f"总文件数：{stats['total_files']}")
-        print(f"成功：{stats['success_count']}")
-        print(f"失败：{stats['failed_count']}")
-        print(f"输出目录：{output_dir}")
-        print("=" * 70)
+        if len(files)>1:
+            # 打印统计
+            print("\n" + "=" * 20)
+            print("处理完成统计")
+            print("=" * 20)
+            print(f"总文件数：{stats['total_files']}")
+            print(f"成功：{stats['success_count']}")
+            print(f"失败：{stats['failed_count']}")
+            print(f"输出目录：{output_dir}")
+            print("=" * 20)
 
-        user_prompt.append({
-            "type":"text",
-            "text": f"\n### 执行结果状态\n"
-        })
-        user_prompt.append({
-            "type":"text",
-            "text": json.dumps(stats,ensure_ascii=False)
-        })
+            user_prompt.append({
+                "type":"text",
+                "text": f"\n### 执行结果状态\n"
+            })
+            user_prompt.append({
+                "type":"text",
+                "text": json.dumps(stats,ensure_ascii=False)
+            })
 
         final_result = self.prompt(
             content=user_prompt,
