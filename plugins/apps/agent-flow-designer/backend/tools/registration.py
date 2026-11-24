@@ -32,7 +32,7 @@ def register_tools(mcp_server: Any, container: DependencyContainer) -> None:
     config_manager = container.config_manager
     tree_cache = container.tree_cache
 
-    from .qwenpaw_remote_client import QwenPawRemoteClient
+    from .qwenpaw_remote_client import QwenPawRemoteClient,download_file
 
     @mcp_server.tool(title='调用文件分析Agent进行用户附件的解析和分析')
     def execute_qwenpaw_doc_parser_agent(
@@ -60,6 +60,10 @@ def register_tools(mcp_server: Any, container: DependencyContainer) -> None:
         username = account_code
         system_prompt = []
 
+        if '会议' in query:
+            result = {"content": "", "success": False, "error": "会议相关的问题，请使用会议助手智能体。"}
+            return result
+
         cwd = _WORKING_DIR / agent_id / f"media/{username}"
 
         _qwenpaw_client = _qwenpaw_client_cache.get(username)
@@ -71,7 +75,9 @@ def register_tools(mcp_server: Any, container: DependencyContainer) -> None:
         images = []
         prompt_msgs.append(dict(type="text",text=query))
         if attachments:
-            for file in attachments:
+            cwd.mkdir(parents=True, exist_ok=True)
+            for url in attachments:
+                file = download_file(url,cwd)
                 images.append(file)
 
         if images:

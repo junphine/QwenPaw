@@ -111,7 +111,7 @@ def read_file(file_path: Path, max_length: int = MAX_SECTION_CHARS_PER_ROUND) ->
         print(f"  x 读取文件失败：{e}")
         return ""
 
-def download_file(url: str, output_dir: str = "output") -> str:
+def download_file(url: str, output_dir: Path|str) -> str:
     """
     下载指定 URL 的文件到本地 output 目录
 
@@ -130,7 +130,7 @@ def download_file(url: str, output_dir: str = "output") -> str:
     if not filename:
         filename = "downloaded_file"
 
-    filepath = os.path.join(output_dir, filename)
+    filepath = Path(output_dir) / filename
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -345,7 +345,7 @@ class QwenPawRemoteClient:
             result["success"] = result["error"] is None
 
         except requests.exceptions.Timeout:
-            result["error"] = "请求超时（24 小时）"
+            result["error"] = "请求超时（6 小时）"
             print(f"\n x 请求超时")
         except Exception as e:
             result["error"] = str(e)
@@ -430,8 +430,6 @@ class QwenPawRemoteClient:
             if not files:
                 return {"success": False, "error": "未找到文件"}
             root = files[0].parent
-
-
 
         result = None
         # 处理统计
