@@ -34,8 +34,7 @@ def resolve_docling_config() -> DoclingConfig:
     slice_ = get_tool_config("docling_parse") or {}
     return DoclingConfig(
         mode=str(slice_.get("mode") or "remote"),
-        api_base_url=str(slice_.get("api_base_url") or DEFAULT_DOCLING_SERVER_URL).rstrip("/")
-        or DEFAULT_DOCLING_SERVER_URL,
+        api_base_url=str(slice_.get("api_base_url") or DEFAULT_DOCLING_SERVER_URL).rstrip("/"),
         api_token=str(slice_.get("api_token") or ""),
         do_ocr=bool(slice_.get("do_ocr", False)),
         do_table_structure=bool(slice_.get("do_table_structure", True)),

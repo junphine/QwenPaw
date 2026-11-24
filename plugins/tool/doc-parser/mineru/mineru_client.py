@@ -12,8 +12,6 @@ from io import BytesIO
 from pathlib import Path
 from typing import List, Dict, Any
 from collections.abc import Callable
-from pypdf import PdfReader, PdfWriter
-from deeptutor.services.keypool import KeyPool
 
 from .config import MinerUConfig, MinerUError
 from .formats import MINERU_PDF_FORMATS, MINERU_SUPPORTED_FORMATS
@@ -279,7 +277,6 @@ def verify_service(config: MinerUConfig):
     if not config.api_keys:
         raise MinerUError("No API token configured.")
     base_url = config.api_base_url.rstrip("/")
-    key_pool = KeyPool(config.api_keys)
     lang_list = []
     if config.api_language:
         lang_list.append(config.api_language)
@@ -337,7 +334,7 @@ def parse_remote(
         size_mb = source_path.stat().st_size / (1024 * 1024)
         report(f"MinerU cloud: uploading {source_path.name} ({size_mb:.1f} MB)")
 
-        if source_path.suffix.lower() in MINERU_PDF_FORMATS:
+        if False and source_path.suffix.lower() in MINERU_PDF_FORMATS:
             page_count = _pdf_page_count(source_path)
             if page_count is not None and page_count >= config.max_pages_per_part:
                 total = page_count // config.max_pages_per_part
@@ -350,7 +347,6 @@ def parse_remote(
 
 
     base_url = config.api_base_url.rstrip("/")
-    key_pool = KeyPool(config.api_keys)
     lang_list = []
     if config.api_language:
         lang_list.append(config.api_language)
@@ -363,7 +359,7 @@ def parse_remote(
         formula_enable=config.enable_formula,
         table_enable=config.enable_table,
         start_page_id=0,
-        end_page_id =page_count
+        end_page_id=page_count
     )
 
     archive_bytes = client.export_batch_markdown_bundle(
@@ -384,6 +380,7 @@ def _pdf_page_count(source_path: Path) -> int | None:
     """Number of pages in a PDF, or ``None`` when pypdf cannot read it (e.g. a
     truncated/encrypted file). ``None`` keeps the legacy single-file behaviour —
     an unreadable PDF goes to MinerU as-is and fails there if it is truly broken."""
+    from pypdf import PdfReader, PdfWriter
     try:
         with PdfReader(str(source_path)) as reader:
             return len(reader.pages)

@@ -101,11 +101,7 @@ def resolve_mineru_config() -> MinerUConfig:
     return MinerUConfig(
         mode=str(settings.get("mode") or 'local'),
         api_base_url=str(settings.get("api_base_url") or DEFAULT_MUNERU_SERVER_URL),
-        api_token=(
-            [str(value).strip() for value in settings.get("api_token", []) if str(value).strip()]
-            if isinstance(settings.get("api_token"), list)
-            else str(settings.get("api_token") or "").strip()
-        ),
+        api_token=str(settings.get("api_token") or ""),
         local_cli_path=str(settings.get("local_cli_path") or ""),
         model_download_source=str(settings.get("model_download_source") or "huggingface"),
         model_download_endpoint=str(settings.get("model_download_endpoint") or ""),

@@ -5,6 +5,7 @@ import base64
 from pathlib import Path
 from typing import List, Dict, Tuple
 import requests
+from urllib.parse import urlparse, unquote
 import json
 import uuid
 import time
@@ -22,8 +23,8 @@ MAX_SECTION_CHARS_PER_ROUND = 100_000
 # 大纲导航最多迭代轮数（防止模型反复请求陷入死循环）
 MAX_OUTLINE_ROUNDS = 5
 
-# 聊天请求超时时间（秒）：24 小时
-CHAT_TIMEOUT_SECONDS = 24 * 60 * 60
+# 聊天请求超时时间（秒）：6分钟
+CHAT_TIMEOUT_SECONDS = 60 * 6
 
 # 1024×1024 的图片约消耗 1,369 token；1920×1080 约 2,769 token
 VL_TOKENS_PER_IMAGE = 1369
@@ -72,6 +73,89 @@ def is_image_by_ext(file_path: Path):
 def guess_image_mime(file_path: Path) -> str:
     """根据文件扩展名推断图片的 MIME 类型"""
     return image_mime_mapping.get(file_path.suffix.lower(), "image/jpeg")
+
+def read_file(file_path: Path, max_length: int = MAX_SECTION_CHARS_PER_ROUND) -> str:
+    """
+    读取文件内容
+
+    Args:
+        file_path: 文件路径
+        max_length: 最大读取字符数（避免超出 token 限制）
+    Returns:
+        str: 文件内容
+    """
+    try:
+        # 尝试 UTF-8 编码
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        # 如果内容过长，截取前 max_length 个字符
+        if len(content) > max_length:
+            print(f"  ! 文件内容过长 ({len(content)} 字符)，截取前 {max_length} 字符")
+            content = content[:max_length] + "\n\n[内容过长，已截断...]"
+
+        return content
+
+    except UnicodeDecodeError:
+        # 尝试其他编码
+        try:
+            with open(file_path, 'r', encoding='gbk') as f:
+                content = f.read()
+            if len(content) > max_length:
+                content = content[:max_length] + "\n\n[内容过长，已截断...]"
+            return content
+        except Exception as e:
+            print(f"  x 读取文件失败（编码问题）: {e}")
+            return ""
+    except Exception as e:
+        print(f"  x 读取文件失败：{e}")
+        return ""
+
+def download_file(url: str, output_dir: str = "output") -> str:
+    """
+    下载指定 URL 的文件到本地 output 目录
+
+    :param url: 下载地址（支持带签名参数的 OSS URL）
+    :param output_dir: 本地保存目录，默认 output
+    :return: 本地保存的完整文件路径
+    """
+    if isinstance(url,Path):
+        return url
+    if not url.startswith('http://') and not url.startswith('https://'):
+        return url
+
+    # 从 URL 路径中提取文件名（去掉查询参数并做 URL 解码）
+    parsed = urlparse(url)
+    filename = unquote(os.path.basename(parsed.path))
+    if not filename:
+        filename = "downloaded_file"
+
+    filepath = os.path.join(output_dir, filename)
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                      "AppleWebKit/537.36 (KHTML, like Gecko) "
+                      "Chrome/120.0.0.0 Safari/537.36"
+    }
+
+    print(f"开始下载: {url}")
+    with requests.get(url, headers=headers, stream=True, timeout=60) as resp:
+        resp.raise_for_status()
+        total = int(resp.headers.get("Content-Length", 0))
+        downloaded = 0
+
+        with open(filepath, "wb") as f:
+            for chunk in resp.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    if total > 0:
+                        percent = downloaded / total * 100
+                        print(f"\r进度: {percent:6.2f}%  "
+                              f"({downloaded}/{total} 字节)", end="", flush=True)
+
+    print(f"\n下载完成: {filepath}")
+    return filepath
 
 
 class QwenPawRemoteClient:
@@ -188,42 +272,6 @@ class QwenPawRemoteClient:
 
         return sorted(files)
 
-    def read_file(self, file_path: Path, max_length: int = MAX_SECTION_CHARS_PER_ROUND) -> str:
-        """
-        读取文件内容
-
-        Args:
-            file_path: 文件路径
-            max_length: 最大读取字符数（避免超出 token 限制）
-        Returns:
-            str: 文件内容
-        """
-        try:
-            # 尝试 UTF-8 编码
-            with open(file_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-
-            # 如果内容过长，截取前 max_length 个字符
-            if len(content) > max_length:
-                print(f"  ! 文件内容过长 ({len(content)} 字符)，截取前 {max_length} 字符")
-                content = content[:max_length] + "\n\n[内容过长，已截断...]"
-
-            return content
-
-        except UnicodeDecodeError:
-            # 尝试其他编码
-            try:
-                with open(file_path, 'r', encoding='gbk') as f:
-                    content = f.read()
-                if len(content) > max_length:
-                    content = content[:max_length] + "\n\n[内容过长，已截断...]"
-                return content
-            except Exception as e:
-                print(f"  x 读取文件失败（编码问题）: {e}")
-                return ""
-        except Exception as e:
-            print(f"  x 读取文件失败：{e}")
-            return ""
 
     def _post_chat(self,
                    messages: List[Dict],
@@ -354,6 +402,14 @@ class QwenPawRemoteClient:
         """
         # 扫描文件
         root = None
+        # 创建输出目录
+        if output_dir:
+            Path(output_dir).mkdir(parents=True, exist_ok=True)
+            if isinstance(directory,str):
+                directory = download_file(directory,output_dir)
+            elif isinstance(directory,list):
+                directory = [download_file(url,output_dir) for url in directory]
+
         if isinstance(directory,str) or isinstance(directory,Path):
             root = directory if isinstance(directory,Path) else Path(directory)
             try:
@@ -375,9 +431,7 @@ class QwenPawRemoteClient:
                 return {"success": False, "error": "未找到文件"}
             root = files[0].parent
 
-        # 创建输出目录
-        if output_dir:
-            Path(output_dir).mkdir(parents=True, exist_ok=True)
+
 
         result = None
         # 处理统计
@@ -458,7 +512,7 @@ class QwenPawRemoteClient:
                     skip_images = True
                 # 读取数据，代码文件
                 elif is_text:
-                    content = self.read_file(file_path)
+                    content = read_file(file_path)
                     if not content:
                         print(f"  x 跳过（无法读取）")
                         stats["failed_count"] += 1

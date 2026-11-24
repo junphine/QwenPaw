@@ -22,7 +22,7 @@
         "requires_config": true,
         "config_fields": [
           {
-            "name": "api_key",
+            "name": "api_token",
             "label": "Mineru API Key",
             "type": "password",
             "required": false,
@@ -30,7 +30,7 @@
             "help": "Get your API key from Mineru Serve"
           },
           {
-            "name": "endpoint",
+            "name": "api_base_url",
             "label": "API Endpoint",
             "type": "text",
             "required": false,
@@ -56,7 +56,7 @@
         "requires_config": true,
         "config_fields": [
           {
-            "name": "api_key",
+            "name": "api_token",
             "label": "Docling Serve API Key",
             "type": "password",
             "required": false,
@@ -64,7 +64,7 @@
             "help": "Get your API key from Docling Serve"
           },
           {
-            "name": "endpoint",
+            "name": "api_base_url",
             "label": "API Endpoint",
             "type": "text",
             "required": false,
