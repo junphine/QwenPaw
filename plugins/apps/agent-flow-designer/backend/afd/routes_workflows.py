@@ -22,7 +22,7 @@ from engine.schema import build_node_contract
 
 from .models import WorkflowDefinition, ValidateRequest, _SERVER_OWNED_KEYS
 from .store import (
-    _LOCK,_DATA_DIR,_VERSIONS_FILE,_load_from_disk,
+    _LOCK,_DATA_DIR,_load_version_from_disk,
     _read_all, _persist_to_disk, _find_workflow,
     _workflow_owner, _is_visible_to, _require_owner,
     _load_versions, _persist_versions,
@@ -338,7 +338,7 @@ async def rollback_workflow(
     The current editing state is overwritten by the published version snapshot.
     """
     async with _LOCK(workflow_id):
-        target_version = _load_from_disk(_VERSIONS_FILE(workflow_id,version_id))
+        target_version = _load_version_from_disk(workflow_id,version_id)
         if target_version is None:
             raise HTTPException(status_code=404, detail="Version not found")
         
@@ -378,7 +378,7 @@ async def get_published_workflow(
         if not published_version_id:
             raise HTTPException(status_code=404, detail="Workflow has not been published")
         
-        v = _load_from_disk(_VERSIONS_FILE(workflow_id,published_version_id))
+        v = _load_version_from_disk(workflow_id,published_version_id)
         if v:
             if v.get("id") == published_version_id:
                 return {"success": True, "data": v}
@@ -422,7 +422,7 @@ async def deploy_workflow(
             )
 
         # Verify the published version exists
-        target_version = _load_from_disk(_VERSIONS_FILE(workflow_id,published_version_id))
+        target_version = _load_version_from_disk(workflow_id,published_version_id)
         if target_version is None:
             raise HTTPException(
                 status_code=404,
@@ -486,7 +486,7 @@ async def get_deployed_workflow(
         if not deployed_version_id:
             raise HTTPException(status_code=404, detail="Workflow is not deployed")
         
-        v = _load_from_disk(_VERSIONS_FILE(workflow_id,deployed_version_id))
+        v = _load_version_from_disk(workflow_id,deployed_version_id)
         if v:
             if v.get("id") == deployed_version_id:
                 return {"success": True, "data": v}

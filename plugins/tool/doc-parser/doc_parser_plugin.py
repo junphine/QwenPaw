@@ -1,11 +1,14 @@
 # -*- coding: utf-8 -*-
 """Qwen-Image Tool Plugin Entry Point."""
 
-import importlib.util
 import logging
 import os
 from pathlib import Path
 from typing import List, Dict, Any
+import anyio
+
+from pydantic import FileUrl
+
 from qwenpaw.plugins.api import PluginApi
 from agentscope.message import DataBlock, TextBlock, URLSource
 from agentscope.message import ToolResultState
@@ -13,13 +16,14 @@ from agentscope.tool import ToolChunk
 from qwenpaw.constant import DEFAULT_MEDIA_DIR
 from qwenpaw.plugins import get_tool_config
 from qwenpaw.app.agent_context import get_current_user_id
+from qwenpaw.runtime.tool_registry import tool_descriptor
 
 logger = logging.getLogger(__name__)
 
 _PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
-def mineru_parse(sources_path:List[str])-> ToolChunk:
+def mineru_parse_sync(sources_path:List[str])-> ToolChunk:
     """Generate md files from documents(pdf,docx,pptx,excel,etc) using MinerU model
 
     Args:
@@ -46,7 +50,7 @@ def mineru_parse(sources_path:List[str])-> ToolChunk:
     for output in output_md_path:
         data = DataBlock(
             source=URLSource(
-                url="file://" + str(output),
+                url=FileUrl("file://" + str(output)),
                 media_type="text/markdown",
             ),
         )
@@ -58,7 +62,45 @@ def mineru_parse(sources_path:List[str])-> ToolChunk:
         content=content
     )
 
-def docling_parse(sources_path:List[str])-> ToolChunk:
+async def mineru_parse(sources_path:List[str])-> ToolChunk:
+    """Generate md files from documents(pdf,docx,pptx,excel,etc) using MinerU model
+
+    Args:
+        sources_path: The input documents path to convert
+    Returns:
+        ToolChunk with the md files path in result
+    """
+    return await anyio.to_thread.run_sync(mineru_parse_sync,sources_path)
+
+
+async def docling_parse_one(source_path:str,docling_config)-> ToolChunk:
+    """Generate md files from documents(pdf,docx,pptx,excel,etc) using Docling model
+
+    Args:
+        sources_path: The input documents path to convert
+    Returns:
+        ToolChunk with the md files path in result
+    """
+    from .docling import remote
+    uid = get_current_user_id() or 'default'
+    output_base = DEFAULT_MEDIA_DIR / uid
+    md_path = await anyio.to_thread.run_sync(remote.parse_remote,Path(source_path),output_base,docling_config)
+    return md_path
+
+async def gather(*coros):
+    """按输入顺序返回所有协程结果；任一失败则取消全部并抛出。"""
+    results = [None] * len(coros)
+
+    async def _runner(i, coro):
+        results[i] = await coro
+
+    async with anyio.create_task_group() as tg:
+        for i, c in enumerate(coros):
+            tg.start_soon(_runner, i, c)
+
+    return results
+
+async def docling_parse(sources_path:List[str])-> ToolChunk:
     """Generate md files from documents(pdf,docx,pptx,excel,etc) using Docling model
 
     Args:
@@ -67,14 +109,12 @@ def docling_parse(sources_path:List[str])-> ToolChunk:
         ToolChunk with the md files path in result
     """
     from .docling import config
-    from .docling import remote
     docling_config = config.resolve_docling_config()
-    uid = get_current_user_id() or 'default'
-    output_base = DEFAULT_MEDIA_DIR / uid
-    output_md_path = []
-    for source_path in sources_path:
-        md_path = remote.parse_remote(Path(source_path),output_base,docling_config)
-        output_md_path.append(md_path)
+    n = len(sources_path)
+    limiter = anyio.CapacityLimiter(min(8, max(n, 1)))
+    output_md_path = await gather(*(
+        docling_parse_one(sp, docling_config) for sp in sources_path
+    ))
     content=[
         TextBlock(
             type="text",
@@ -88,7 +128,7 @@ def docling_parse(sources_path:List[str])-> ToolChunk:
     for output in output_md_path:
         data = DataBlock(
             source=URLSource(
-                url="file://" + str(output),
+                url=FileUrl("file://" + str(output)),
                 media_type="text/markdown",
             ),
         )

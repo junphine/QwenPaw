@@ -152,12 +152,21 @@ def _load_json_library(path: Path, label: str) -> Dict[str, Any]:
 
 
 def _load_from_disk(path: Path) -> Dict[str, Any]:
-    """Load workflows from JSON file. Returns empty list if file doesn't exist.
+    """Load workflow from JSON file. Returns None if file doesn't exist.
 
     Raises:
         WorkflowStoreError: When the file exists but cannot be parsed.
     """
     return _load_json_library(path, "工作流库")
+
+def _load_version_from_disk(workflow_id: str, version_id:str) -> Dict[str, Any]:
+    """Load versioned workflow from JSON file. Returns None if file doesn't exist.
+
+    Raises:
+        WorkflowStoreError: When the file exists but cannot be parsed.
+    """
+    path = _VERSIONS_FILE(workflow_id,version_id)
+    return _load_json_library(path, "版本库")
 
 
 def _persist_to_disk(workflow:Dict[str, Any]) -> None:

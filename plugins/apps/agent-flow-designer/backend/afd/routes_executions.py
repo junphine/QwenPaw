@@ -33,10 +33,12 @@ from engine.run_db import (
     list_nodes as _list_run_nodes,
     list_runs as _list_runs,
 )
+from engine import cost_calculator, replay
+from engine import model_pricing as _model_pricing
 
 from .models import CancelRequest, ExecuteRequest, ResumeRequest
 from .store import (
-    _LOCK, _VERSIONS_FILE, _find_workflow, _load_versions, _load_from_disk,
+    _LOCK, _load_version_from_disk, _find_workflow,
     _require_owner, _require_paused_owner,
 )
 from .tools import _build_tool_services
@@ -148,7 +150,7 @@ async def _resolve_execution_workflow(
     # If deployed and not in preview mode, load the deployed version snapshot
     deployed_version_id = workflow.get("deployed_version_id")
     if deployed_version_id and not preview:
-        v = _load_from_disk(_VERSIONS_FILE(workflow_id,deployed_version_id))
+        v = _load_version_from_disk(workflow_id,deployed_version_id)
         if v and v.get("id") == deployed_version_id:
             # Use the deployed snapshot instead of the editing state
             workflow = {
@@ -228,7 +230,7 @@ async def run_workflow(
             )
         
         # Load deployed version snapshot
-        deployed_version = _load_from_disk(_VERSIONS_FILE(workflow_id,deployed_version_id))
+        deployed_version = _load_version_from_disk(workflow_id,deployed_version_id)
         
         if not deployed_version:
             raise HTTPException(status_code=404, detail="Deployed version not found")
@@ -268,9 +270,31 @@ async def _execute_workflow_core(
     meta = _run_meta(
         workflow, context, str(getattr(ctx, "user_id", "") or ""), trigger_kind
     )
-    return await run_workflow_sync(
-        workflow_id, workflow, context, services=services, meta=meta
-    )
+    
+    # Register to _ACTIVE_RUNS so /cancel can stop it (Scheme C: full cancellation)
+    execution_id_holder: Dict[str, str] = {}  # mutable holder for nested scope
+    
+    async def _run_with_cancel_support() -> dict:
+        """Wrapper that registers/unregisters from _ACTIVE_RUNS."""
+        # We need to get the execution_id before calling run_workflow_sync.
+        # Since run_workflow_sync generates it internally, we'll use a different approach:
+        # Pass a pre-created execution_id and register it.
+        import uuid as _uuid
+        execution_id = str(_uuid.uuid4())
+        user_id = str(getattr(ctx, "user_id", "") or "default")
+        stop = _begin_run(execution_id, user_id, workflow_id)
+        
+        try:
+            result = await run_workflow_sync(
+                workflow_id, workflow, context, services=services, meta=meta,
+                execution_id=execution_id,  # Pass pre-created ID
+                cancel_check=stop.is_set,   # Pass cancel check callback
+            )
+            return result
+        finally:
+            _end_run(execution_id)
+    
+    return await _run_with_cancel_support()
 
 
 def _sse(obj: dict) -> str:
@@ -652,6 +676,22 @@ async def list_executions(
         offset=max(offset, 0),
         status=status,
     )
+    # Enrich each run with a lightweight cost estimate (no node breakdown in list view)
+    for row in rows:
+        pt = row.get("prompt_tokens") or 0
+        ct = row.get("completion_tokens") or 0
+        tt = row.get("total_tokens") or 0
+        cost = _model_pricing.calculate_cost("default", pt, ct)
+        row["cost"] = {
+            "prompt_tokens": pt,
+            "completion_tokens": ct,
+            "total_tokens": tt,
+            "prompt_cost": cost["prompt_cost"],
+            "completion_cost": cost["completion_cost"],
+            "total_cost": cost["total_cost"],
+            "model_id": cost["model_id"],
+            "node_breakdown": [],
+        }
     return {"success": True, "data": rows}
 
 
@@ -690,8 +730,51 @@ async def get_execution_detail(
                 "action": "refresh",
             },
         )
-    run["nodes"] = await asyncio.to_thread(_list_run_nodes, execution_id, owner)
+    nodes = await asyncio.to_thread(_list_run_nodes, execution_id, owner)
+    run["nodes"] = nodes
+    run = cost_calculator.enrich_run_with_cost(run, nodes)
     return {"success": True, "data": run}
+
+
+
+async def replay_execution(
+    workflow_id: str,
+    execution_id: str,
+    ctx: PawAppContext = Depends(get_scoped_ctx),
+) -> dict:
+    """Replay a past execution from its stored trace without calling any service.
+
+    Returns a response compatible with the ``/execute`` endpoint, but with
+    ``replay: True`` so the consumer knows no real execution took place.
+    """
+    async with _LOCK(workflow_id):
+        wf = _find_workflow(workflow_id)
+    if wf is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error_type": "workflow_not_found",
+                "message": "工作流不存在",
+                "action": "请刷新页面或重新选择工作流",
+            },
+        )
+    _require_owner(wf, ctx.user_id, "重放执行历史")
+
+    owner = ctx.user_id or "default"
+    run = await asyncio.to_thread(_get_run, execution_id, owner)
+    if run is None or run.get("workflow_id") != workflow_id:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error_type": "execution_not_found",
+                "message": "该执行记录不存在，或不属于当前工作流",
+                "action": "refresh",
+            },
+        )
+
+    nodes = await asyncio.to_thread(_list_run_nodes, execution_id, owner)
+    result = await replay.replay_execution_sync(run, nodes)
+    return {"success": True, "data": result}
 
 
 
@@ -705,3 +788,4 @@ def register_routes(router: APIRouter) -> None:
     router.post("/workflows/{workflow_id}/executions/{execution_id}/cancel")(cancel_execution)
     router.get("/workflows/{workflow_id}/executions")(list_executions)
     router.get("/workflows/{workflow_id}/executions/{execution_id}")(get_execution_detail)
+    router.get("/workflows/{workflow_id}/executions/{execution_id}/replay")(replay_execution)

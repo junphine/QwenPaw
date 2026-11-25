@@ -25,17 +25,17 @@ logger.setLevel(logging.DEBUG)
 
 class MinerUClient:
     def __init__(
-        self,
-        base_url: str = None,
-        api_token: str = None,
-        is_ocr: bool = True,
-        language: str = None,
-        enable_table: bool = True,
-        enable_formula: bool = True,
-        model_version: str | None = None,
-        page_ranges: str = "1--1", # 默认第一页到最后一页
-        poll_timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
-        poll_interval_seconds: int = DEFAULT_POLL_INTERVAL_SECONDS,
+            self,
+            base_url: str = None,
+            api_token: str = None,
+            is_ocr: bool = True,
+            language: str = None,
+            enable_table: bool = True,
+            enable_formula: bool = True,
+            model_version: str | None = None,
+            page_ranges: str = "1--1", # 默认第一页到最后一页
+            poll_timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
+            poll_interval_seconds: int = DEFAULT_POLL_INTERVAL_SECONDS,
     ):
         self.base_url = base_url or os.getenv("MINERU_BASE_URL", "")
         self.api_token = api_token or os.getenv("MINERU_API_TOKEN", "")
@@ -54,9 +54,9 @@ class MinerUClient:
             raise ValueError("MINERU_API_TOKEN is not set")
 
     def export_batch_markdown_bundle(
-        self,
-        file_paths: list[Path],
-        output_dir: Path,
+            self,
+            file_paths: list[Path],
+            output_dir: Path,
     ):
         logger.info(f"[MinerU] Starting export_batch_markdown_bundle for {len(file_paths)} files")
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -70,7 +70,7 @@ class MinerUClient:
         logger.info(f"[MinerU] Downloaded zip, size={total_bytes} bytes")
         self._extract_from_zip(zip_contents, output_dir)
         logger.info(f"[MinerU] Extracted to {output_dir}")
-      
+
     def submit_tasks(self, file_paths: list[Path], timeout:float=60.0) -> tuple[str, list[str]]:
         logger.info(f"[MinerU] Submitting {len(file_paths)} files to {self.base_url}")
         payload = {
@@ -133,7 +133,7 @@ class MinerUClient:
         logger.info(f"[MinerU] All {len(all_dones)} files completed")
         return all_dones
 
-      
+
     def _download_zip(self, all_dones: dict[str,str], timeout:float=60.0) -> dict[str,bytes]:
         logger.info(f"[MinerU] Downloading {len(all_dones)} zip files")
         zip_contents = {}
@@ -156,24 +156,24 @@ class MinerUClient:
 
 class MinerUClientLocal:
     def __init__(
-        self,
-        base_url: str = None,
-        api_token: str = None,
-        lang_list: list[str] = None,
-        backend: str = "pipeline",
-        parse_method: str = "auto",
-        formula_enable: bool = True,
-        table_enable: bool = True,
-        return_md: bool = True,
-        return_images: bool = True,
-        response_format_zip: bool = True,
-        return_middle_json: bool = False,
-        return_content_list: bool = True,
-        return_model_output: bool = False,
-        start_page_id: int = 0,
-        end_page_id: int | None = None,
-        poll_timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
-        poll_interval_seconds: int = DEFAULT_POLL_INTERVAL_SECONDS,
+            self,
+            base_url: str = None,
+            api_token: str = None,
+            lang_list: list[str] = None,
+            backend: str = "pipeline",
+            parse_method: str = "auto",
+            formula_enable: bool = True,
+            table_enable: bool = True,
+            return_md: bool = True,
+            return_images: bool = True,
+            response_format_zip: bool = True,
+            return_middle_json: bool = False,
+            return_content_list: bool = True,
+            return_model_output: bool = False,
+            start_page_id: int = 0,
+            end_page_id: int | None = None,
+            poll_timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
+            poll_interval_seconds: int = DEFAULT_POLL_INTERVAL_SECONDS,
     ):
         self.base_url = base_url or os.getenv("MINERU_BASE_URL", "http://127.0.0.1:8000")
         self.api_token = api_token or os.getenv("MINERU_API_TOKEN", "")
@@ -192,14 +192,14 @@ class MinerUClientLocal:
             "return_content_list": return_content_list,
             "return_model_output": return_model_output,
             "start_page_id": start_page_id,
-            "end_page_id": end_page_id,            
+            "end_page_id": end_page_id,
         }
-    
+
     def export_batch_markdown_bundle(
-        self,
-        file_paths: list[Path],
-        output_dir: Path,
-        timeout: float | None = None
+            self,
+            file_paths: list[Path],
+            output_dir: Path,
+            timeout: float | None = None
     ) -> dict[str, dict]:
         logger.info(f"[MinerU] Starting export_batch_markdown_bundle for {len(file_paths)} files")
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -213,11 +213,11 @@ class MinerUClientLocal:
         self._extract_from_zip(zip_content, output_dir)
         logger.info(f"[MinerU] Extracted to {output_dir}")
         return result
-    
+
     def dryrun_export_batch_markdown_bundle(
-        self,
-        file_paths: list[Path],
-        output_dir: Path,
+            self,
+            file_paths: list[Path],
+            output_dir: Path,
     ) -> dict[str, dict]:
         logger.info(f"[MinerU] Starting export_batch_markdown_bundle for {len(file_paths)} files")
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -225,10 +225,10 @@ class MinerUClientLocal:
         logger.info(f"[MinerU] Task submitted, task_id={task_id}")
         result = dict(task_id=task_id,file_paths=str(file_paths))
         logger.info(f"[MinerU] Polling completed for task_id={task_id}")
-        
+
         logger.info(f"[MinerU] Extracted to {output_dir}")
         return result
-        
+
     def submit_tasks(self, file_paths: list[Path], timeout:float=600.0) -> str:
         with httpx.Client(base_url=self.base_url, timeout=timeout) as client:
             files = [
@@ -324,8 +324,8 @@ def parse_remote(
             logger.debug("on_progress callback failed", exc_info=True)
 
     page_count = None
+    sources_path = [Path(source_path) for source_path in sources_path]
     for source_path in sources_path:
-        source_path = Path(source_path)
         if not source_path.is_file():
             raise MinerUError(f"Input file not found: {source_path}")
         if source_path.suffix.lower() not in MINERU_SUPPORTED_FORMATS:
@@ -362,7 +362,7 @@ def parse_remote(
         end_page_id=page_count
     )
 
-    archive_bytes = client.export_batch_markdown_bundle(
+    result = client.export_batch_markdown_bundle(
         sources_path,
         output_base,
         timeout=timeout,
@@ -372,7 +372,7 @@ def parse_remote(
     report("MinerU cloud: extracting archive")
     for source_path in sources_path:
         working_dir = output_base / source_path.stem
-        report("MinerU cloud parse complete: %s → %s", source_path.name, working_dir)
+        report("MinerU cloud parse complete: %s → %s" % (source_path.name, working_dir))
         output.append(working_dir / f'{source_path.stem}.md')
     return output
 

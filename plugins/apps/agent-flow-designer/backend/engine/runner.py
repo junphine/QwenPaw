@@ -299,6 +299,7 @@ class WorkflowRunner:
         cancel_check: Optional[Callable[[], bool]] = None,
         services: Optional[Dict[str, Any]] = None,
         recorder: Optional[RunRecorder] = None,
+        concurrency_limit: int = 1,
     ):
         self.workflow = workflow
         self.state = state
@@ -335,6 +336,7 @@ class WorkflowRunner:
         self._sched: Optional[_Scheduler] = None
         self._resume_from: str = ""
         self.resumed = False
+        self.concurrency_limit = max(1, concurrency_limit)
 
     def _find_back_edges(self, raw_reverse: Dict[str, List[dict]]) -> set:
         """Classify the edges that close a cycle, iteratively (no recursion).
@@ -362,7 +364,7 @@ class WorkflowRunner:
                 outgoing = self.adjacency.get(nid, [])
                 if idx < len(outgoing):
                     stack[-1] = (nid, idx + 1)
-                    tgt = outgoing[idx]["target"]
+                    tgt:str = outgoing[idx]["target"]
                     if color[tgt] == gray:
                         found.add((nid, tgt))
                     elif color[tgt] == white:
@@ -459,6 +461,155 @@ class WorkflowRunner:
             finally:
                 self.recorder.finish()
 
+    async def _execute_node(
+        self, node_id: str, sched: _Scheduler
+    ) -> Dict[str, Any]:
+        """Execute a single node and return events and metadata.
+
+        This is the core per-node execution logic extracted from ``_traverse``.
+        When ``concurrency_limit > 1``, multiple nodes in the same layer are
+        executed concurrently via ``asyncio.gather``.
+
+        Returns a dict with keys:
+            events: List[RunEvent]
+            route_info: Optional[Dict[str, Any]]
+            failed_detail: str
+            wf_done: bool
+            wf_pause: bool
+        """
+        events: List[RunEvent] = []
+        node = self.node_map.get(node_id)
+        if not node:
+            return {
+                "events": events,
+                "route_info": None,
+                "failed_detail": "",
+                "wf_done": False,
+                "wf_pause": False,
+            }
+
+        node_type = node.get("type", "")
+        handler = get_handler(node_type) or _default_handler
+
+        route_info: Optional[Dict[str, Any]] = None
+        failed_detail = ""
+
+        ctx = NodeRunContext(
+            node=node,
+            state=self.state,
+            workflow=self.workflow,
+            live_predecessors=list(sched.live_preds.get(node_id, [])),
+            services=self.services,
+        )
+        self.state.node_status[node_id] = "running"
+
+        events.append(RunEvent(
+            EventType.NODE_START,
+            node_id,
+            {"nodeLabel": node.get("label", node_id), "type": node_type},
+        ))
+
+        if node_type in RETRY_ENABLED_TYPES:
+            policy = parse_retry_policy(node.get("config"))
+        else:
+            policy = RetryPolicy()
+        # 审批恢复执行：标记存在则本次只跑一次，绝不重新弹窗问人，也绝不
+        # 在没有新授权的情况下重跑审批工具。runner 只读存在性、绝不回填；
+        # handler 照样 pop（consume-once 仅一处）。timeout 与重试正交，保留。
+        if self.state.context.get(f"node_{node_id}_approval") is not None:
+            policy = policy.with_retries_disabled()
+
+        for attempt in range(policy.max_retries + 1):
+            outcome: Dict[str, Any] = {"kind": "none"}
+            stream_live = attempt == policy.max_retries
+            gen = self._run_one_attempt(handler, ctx, policy, stream_live, outcome)
+            try:
+                async for event in gen:
+                    if event.trace_item is not None:
+                        trace = event.trace_item
+                        if policy.max_retries > 0 and event.type in (
+                            EventType.NODE_DONE, EventType.NODE_ERROR
+                        ):
+                            trace = {**trace, "attempts": attempt + 1}
+                        self.state.trace_items.append(trace)
+                    if event.type == EventType.ROUTE:
+                        route_info = event.payload
+                    if event.type in (EventType.NODE_DONE, EventType.NODE_ERROR):
+                        self.state.node_status[node_id] = (
+                            "failed" if event.type == EventType.NODE_ERROR else "completed"
+                        )
+                    if event.type == EventType.NODE_ERROR:
+                        failed_detail = str(
+                            (event.trace_item or {}).get("error", "")
+                            or (event.trace_item or {}).get("message", "节点执行失败")
+                        )
+                    if event.type == EventType.WF_DONE:
+                        self.state.result = event.payload.get("result", "") or ""
+                        self.state.reached_end = True
+                        # A sibling branch still queued (or never delivered) when this
+                        # End node fired must not vanish from the run: the graph passes
+                        # validation, so dropping it silently would report "completed"
+                        # for work that never happened.
+                        for nid, nnode in self.node_map.items():
+                            if nid in sched.executed:
+                                continue
+                            self.state.node_status[nid] = "skipped"
+                            trace = _skipped_trace(nnode, nid, "工作流已到达结束节点，节点未运行")
+                            self.state.trace_items.append(trace)
+                            events.append(RunEvent(EventType.NODE_DONE, nid, {"trace": trace}))
+                        self.state.status = "completed"
+                        events.append(event)
+                        return {
+                            "events": events,
+                            "route_info": route_info,
+                            "failed_detail": failed_detail,
+                            "wf_done": True,
+                            "wf_pause": False,
+                        }
+                    if event.type == EventType.WF_PAUSE:
+                        self.state.status = "paused"
+                        self.state.pending_pause = {
+                            "nodeId": node_id,
+                            "question": event.payload.get("question", ""),
+                            # 写侧就归一化：分派读的是这两个字面量，非法值必须 fail-closed
+                            # 到 answer（= 最保守的旧语义），不能原样落库。
+                            "resumeMode": _normalize_resume_mode(
+                                event.payload.get("resumeMode")
+                            ),
+                            "pauseKind": str(
+                                event.payload.get("pauseKind") or PAUSE_KIND_ASK
+                            ).strip(),
+                            "scheduler": sched.snapshot(),
+                            # Legacy fields, kept so older readers still find a position.
+                            "queue": list(sched.ready),
+                            "visited": sorted(sched.executed),
+                        }
+                        _save_paused_run(self.state.execution_id, self.workflow, self.state)
+                        events.append(event)
+                        return {
+                            "events": events,
+                            "route_info": route_info,
+                            "failed_detail": failed_detail,
+                            "wf_done": False,
+                            "wf_pause": True,
+                        }
+                    events.append(event)
+            finally:
+                await gen.aclose()
+
+            if outcome["kind"] == "error" and attempt < policy.max_retries:
+                await asyncio.sleep(backoff_delay(policy, attempt + 1))
+                continue
+            break
+
+        return {
+            "events": events,
+            "route_info": route_info,
+            "failed_detail": failed_detail,
+            "wf_done": False,
+            "wf_pause": False,
+        }
+
     async def _traverse(self) -> AsyncIterator[RunEvent]:
         """Traverse the graph and yield node/route/workflow events.
 
@@ -495,131 +646,98 @@ class WorkflowRunner:
                     yield event
                 return
 
-            node_id = sched.ready.pop(0)
-            if node_id in sched.executed:
-                continue
-            node = self.node_map.get(node_id)
-            if not node:
-                sched.executed.add(node_id)
-                continue
-            sched.executed.add(node_id)
-
-            tokens = sched.received.get(node_id, [])
-            if tokens and not any(tokens):
-                # Every in-edge was pruned by a router or an aborted path.
-                self.state.node_status[node_id] = "skipped"
-                # disable@byron
-                #trace = _skipped_trace(node, node_id, "上游分支未命中，节点已跳过")
-                # self.state.trace_items.append(trace)
-                # yield RunEvent(EventType.NODE_DONE, node_id, {"trace": trace})
-                for edge in self.adjacency.get(node_id, []):
-                    sched.deliver(node_id, edge["target"], live=False)
-                continue
-
-            node_type = node.get("type", "")
-            handler = get_handler(node_type) or _default_handler
-            route_info: Optional[Dict[str, Any]] = None
-            failed_detail = ""
-
-            ctx = NodeRunContext(
-                node=node,
-                state=self.state,
-                workflow=self.workflow,
-                live_predecessors=list(sched.live_preds.get(node_id, [])),
-                services=self.services,
-            )
-            self.state.node_status[node_id] = "running"
-
-            yield RunEvent(
-                EventType.NODE_START,
-                node_id,
-                {"nodeLabel": node.get("label", node_id), "type": node_type},
-            )
-
-            if node_type in RETRY_ENABLED_TYPES:
-                policy = parse_retry_policy(node.get("config"))
-            else:
-                policy = RetryPolicy()
-            # 审批恢复执行：标记存在则本次只跑一次，绝不重新弹窗问人，也绝不
-            # 在没有新授权的情况下重跑审批工具。runner 只读存在性、绝不回填；
-            # handler 照样 pop（consume-once 仅一处）。timeout 与重试正交，保留。
-            if self.state.context.get(f"node_{node_id}_approval") is not None:
-                policy = policy.with_retries_disabled()
-
-            for attempt in range(policy.max_retries + 1):
-                outcome: Dict[str, Any] = {"kind": "none"}
-                stream_live = attempt == policy.max_retries
-                async for event in self._run_one_attempt(
-                    handler, ctx, policy, stream_live, outcome
-                ):
-                    if event.trace_item is not None:
-                        trace = event.trace_item
-                        if policy.max_retries > 0 and event.type in (
-                            EventType.NODE_DONE, EventType.NODE_ERROR
-                        ):
-                            trace = {**trace, "attempts": attempt + 1}
-                        self.state.trace_items.append(trace)
-                    if event.type == EventType.ROUTE:
-                        route_info = event.payload
-                    if event.type in (EventType.NODE_DONE, EventType.NODE_ERROR):
-                        self.state.node_status[node_id] = (
-                            "failed" if event.type == EventType.NODE_ERROR else "completed"
-                        )
-                    if event.type == EventType.NODE_ERROR:
-                        failed_detail = str(
-                            (event.trace_item or {}).get("error", "")
-                            or (event.trace_item or {}).get("message", "节点执行失败")
-                        )
-                    if event.type == EventType.WF_DONE:
-                        self.state.result = event.payload.get("result", "") or ""
-                        self.state.reached_end = True
-                        # A sibling branch still queued (or never delivered) when this
-                        # End node fired must not vanish from the run: the graph passes
-                        # validation, so dropping it silently would report "completed"
-                        # for work that never happened.
-                        async for skipped in self._skip_unexecuted(
-                            "工作流已到达结束节点，节点未运行"
-                        ):
-                            yield skipped
-                        self.state.status = "completed"
-                        yield event
-                        return
-                    if event.type == EventType.WF_PAUSE:
-                        self.state.status = "paused"
-                        self.state.pending_pause = {
-                            "nodeId": node_id,
-                            "question": event.payload.get("question", ""),
-                            # 写侧就归一化：分派读的是这两个字面量，非法值必须 fail-closed
-                            # 到 answer（= 最保守的旧语义），不能原样落库。
-                            "resumeMode": _normalize_resume_mode(
-                                event.payload.get("resumeMode")
-                            ),
-                            "pauseKind": str(
-                                event.payload.get("pauseKind") or PAUSE_KIND_ASK
-                            ).strip(),
-                            "scheduler": sched.snapshot(),
-                            # Legacy fields, kept so older readers still find a position.
-                            "queue": list(sched.ready),
-                            "visited": sorted(sched.executed),
-                        }
-                        _save_paused_run(self.state.execution_id, self.workflow, self.state)
-                        yield event
-                        return
-                    yield event
-
-                if outcome["kind"] == "error" and attempt < policy.max_retries:
-                    await asyncio.sleep(backoff_delay(policy, attempt + 1))
+            # Collect a batch of ready nodes (same layer from the barrier).
+            batch = []
+            while sched.ready:
+                node_id = sched.ready.pop(0)
+                if node_id in sched.executed:
                     continue
-                break
+                batch.append(node_id)
 
-            decisions = self._classify_outgoing(node, route_info, bool(failed_detail))
-            if decisions is None:
-                async for abort_event in self._abort(node_id, failed_detail):
-                    yield abort_event
-                return
+            # Evaluate skip conditions (dead tokens) serially — they only touch
+            # ``sched`` and ``state``, and ``sched`` must not be mutated
+            # concurrently.
+            active_batch = []
+            for node_id in batch:
+                tokens = sched.received.get(node_id, [])
+                if tokens and not any(tokens):
+                    # Every in-edge was pruned by a router or an aborted path.
+                    node = self.node_map.get(node_id)
+                    if node:
+                        self.state.node_status[node_id] = "skipped"
+                        # disable@byron
+                        #trace = _skipped_trace(node, node_id, "上游分支未命中，节点已跳过")
+                        #self.state.trace_items.append(trace)
+                        #yield RunEvent(EventType.NODE_DONE, node_id, {"trace": trace})
+                        for edge in self.adjacency.get(node_id, []):
+                            sched.deliver(node_id, edge["target"], live=False)
+                    continue
+                active_batch.append(node_id)
 
-            for edge, live in zip(self.adjacency.get(node_id, []), decisions):
-                sched.deliver(node_id, edge["target"], live=live)
+            if not active_batch:
+                continue
+
+            if len(active_batch) == 1 or self.concurrency_limit == 1:
+                # Serial execution — backward compatible default.
+                # Process each ready node in the batch one at a time.
+                for node_id in active_batch:
+                    sched.executed.add(node_id)
+                    result = await self._execute_node(node_id, sched)
+                    for event in result["events"]:
+                        yield event
+
+                    if result["wf_done"] or result["wf_pause"]:
+                        return
+
+                    node = self.node_map.get(node_id)
+                    if not node:
+                        continue
+                    decisions = self._classify_outgoing(node, result["route_info"], bool(result["failed_detail"]))
+                    if decisions is None:
+                        async for abort_event in self._abort(node_id, result["failed_detail"]):
+                            yield abort_event
+                        return
+
+                    for edge, live in zip(self.adjacency.get(node_id, []), decisions):
+                        sched.deliver(node_id, edge["target"], live=live)
+            else:
+                # Concurrent execution: gather results, then serialise delivery.
+                sem = asyncio.Semaphore(self.concurrency_limit)
+
+                async def run_with_sem(node_id):
+                    async with sem:
+                        return await self._execute_node(node_id, sched)
+
+                results = await asyncio.gather(*[run_with_sem(node_id) for node_id in active_batch])
+
+                # Mark all nodes in this batch as executed now that they have
+                # finished (or failed/paused).
+                for node_id in active_batch:
+                    sched.executed.add(node_id)
+
+                # Yield events in deterministic node order.
+                for node_id, result in zip(active_batch, results):
+                    for event in result["events"]:
+                        yield event
+
+                # Check early termination (WF_DONE / WF_PAUSE).
+                for result in results:
+                    if result["wf_done"] or result["wf_pause"]:
+                        return
+
+                # Serial post-processing: deliver tokens for each node.
+                for node_id, result in zip(active_batch, results):
+                    node = self.node_map.get(node_id)
+                    if not node:
+                        continue
+                    decisions = self._classify_outgoing(node, result["route_info"], bool(result["failed_detail"]))
+                    if decisions is None:
+                        async for abort_event in self._abort(node_id, result["failed_detail"]):
+                            yield abort_event
+                        return
+
+                    for edge, live in zip(self.adjacency.get(node_id, []), decisions):
+                        sched.deliver(node_id, edge["target"], live=live)
 
         # Falling out of the loop means the queue drained: no end node was
         # reached, nothing failed, nothing paused. The run is over and its
@@ -680,6 +798,8 @@ class WorkflowRunner:
             outcome["kind"] = "error"
             if stream_live:
                 yield RunEvent(EventType.NODE_ERROR, ctx.node_id, {"trace": trace})
+        except Exception as exc:
+            raise
         finally:
             await gen.aclose()
 
@@ -813,6 +933,7 @@ async def _consume_run(
                 "execution_id": execution_id,
                 "status": "completed",
                 "result": state.result.strip(),
+                "node_outputs": dict(state.node_outputs),  # Include node outputs for subflow extraction
                 "trace": {
                     "workflowId": workflow_id,
                     "status": "completed",
@@ -846,6 +967,8 @@ async def run_workflow_sync(
     services: Optional[Dict[str, Any]] = None,
     *,
     meta: Optional[RunMeta] = None,
+    execution_id: Optional[str] = None,
+    cancel_check: Optional[Callable[[], bool]] = None,
 ) -> Dict[str, Any]:
     """Execute a workflow and return the legacy JSON contract.
 
@@ -853,15 +976,23 @@ async def run_workflow_sync(
     how it was triggered, the caller's input. Without it nothing is written:
     history is opt-in per call site, so an unauthenticated or otherwise
     unattributable run never lands in someone's list.
+    
+    ``execution_id`` can be pre-created by the caller (e.g., for cancellation
+    support). If not provided, one will be generated internally.
+    
+    ``cancel_check`` is a callback polled between nodes to check if the run
+    should be stopped early (used by /cancel endpoint).
     """
-    execution_id = str(uuid.uuid4())
+    exec_id = execution_id or str(uuid.uuid4())
     state = ExecutionState(
-        execution_id=execution_id,
+        execution_id=exec_id,
         workflow_id=workflow_id,
         context=dict(context),
     )
     recorder = RunRecorder(state, workflow_id, meta) if meta is not None else None
-    runner = WorkflowRunner(workflow, state, services=services, recorder=recorder)
+    runner = WorkflowRunner(
+        workflow, state, cancel_check=cancel_check, services=services, recorder=recorder
+    )
 
     if not runner.start_nodes():
         result_text = "工作流执行完成（无开始节点）。"
@@ -876,7 +1007,7 @@ async def run_workflow_sync(
         return {
             "success": True,
             "data": {
-                "execution_id": execution_id,
+                "execution_id": exec_id,
                 "status": "completed",
                 "result": result_text,
                 "trace": {"workflowId": workflow_id, "status": "completed", "items": []},

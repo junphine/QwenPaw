@@ -8,6 +8,7 @@ import logging
 import os
 import requests
 import time
+import anyio
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -35,13 +36,35 @@ def register_tools(mcp_server: Any, container: DependencyContainer) -> None:
     from .qwenpaw_remote_client import QwenPawRemoteClient,download_file
 
     @mcp_server.tool(title='调用文件分析Agent进行用户附件的解析和分析')
+    async def execute_doc_parser_agent(
+            query: str ,
+            account_code: str = '',
+            conversation_id: str = '',
+            attachments: List[str] = None,
+            agent_id: str = 'doc_parser',
+        )-> Dict[str, Any]:
+        """Run a file agent query on user attachments files. 通过远程调用QwenPaw的文件分析Agent进行用户附件的解析和分析
+
+        Args:
+            query: user input query string
+            account_code: user account code 用户信息里面的账号accountCode
+            conversation_id: Optional specific conversation_id to identity session
+            attachments: Optional specific file url to query 用户上传的附件列表，可以使用url(http://)
+            agent_id: which agent to use,use default for file parse
+
+        Returns:
+            Dict of query result
+        """
+        return await anyio.to_thread.run_sync(execute_qwenpaw_doc_parser_agent, query,account_code,conversation_id,attachments,agent_id)
+
+
     def execute_qwenpaw_doc_parser_agent(
         query: str ,
         account_code: str = '',
         conversation_id: str = '',
         attachments: List[str] = None,
         agent_id: str = 'doc_parser',
-    )-> Dict[str, Any]:
+        )-> Dict[str, Any]:
         """Run a file agent query on user attachments files. 通过远程调用QwenPaw的文件分析Agent进行用户附件的解析和分析
 
         Args:
@@ -104,7 +127,28 @@ def register_workflow_tool(mcp_server: Any,workflow: Dict, container: Dependency
     workflow_id = workflow['id']
 
     @mcp_server.tool(name='wf-'+workflow_id,title=name,description=description)
-    async def simple_get_execute_workflow_stream(
+    async def execute_workflow_stream(
+        query: str ,
+        account_code: str = '',
+        conversation_id: str = '',
+        attachments: List[str] = None,
+        agent_id: str = 'doc_parser',
+        )-> Dict[str, Any]:
+        """Stream workflow execution progress as Server-Sent Events
+
+        Args:
+            query: user input query string
+            account_code: user account_code
+            conversation_id: Optional specific conversation_id to identity session
+            attachments: Optional specific file to query
+            agent_id: which agent to use,use default for file parse
+
+        Returns:
+            Dict of query result
+        """
+        return await anyio.to_thread.run_sync(simple_execute_workflow_stream, query,account_code,conversation_id,attachments,agent_id)
+
+    async def simple_execute_workflow_stream(
             query: str ,
             account_code: str = '',
             conversation_id: str = '',

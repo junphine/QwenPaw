@@ -12,12 +12,14 @@ import asyncio
 import json
 import re
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from engine import (
     EventType,
+    ExecutionState,
     NodeRunContext,
     RunEvent,
+    WorkflowRunner,
     assemble_final_result,
     get_logger,
     register_node,
@@ -33,6 +35,7 @@ from engine.schema import (
 from . import tools
 from .llm_client import _call_agent_chat
 from .routing import _evaluate_router_detailed_async, _resolve_variable_ex
+from .store import _find_workflow, _load_version_from_disk
 from .tools import (
     ToolApprovalRequired,
     _invoke_http_tool,
@@ -41,8 +44,94 @@ from .tools import (
     _resolve_tool_params,
     _resolve_tool_source,
 )
+from engine.runner import run_workflow_sync
 
 logger = get_logger(__name__)
+
+
+# ── Secret reference resolution ───────────────────────────────────────
+
+def _is_secret_ref(value: str) -> bool:
+    """Check if a value is a secret reference in the format ``ref:<workspace_id>:<secret_name>:<field>``."""
+    return isinstance(value, str) and value.strip().startswith("ref:")
+
+
+async def _resolve_secret_ref(
+    ref: str,
+    services: dict,
+) -> str:
+    """Resolve a secret reference from the platform credential store.
+
+    Format: ``ref:<workspace_id>:<secret_name>:<field>``
+    - ``workspace_id``: The workspace identifier (can be empty for current workspace)
+    - ``secret_name``: The name of the secret in the credential store
+    - ``field``: The field to extract from the secret's values (default: "value")
+
+    Returns the decrypted secret value as a string.
+    Raises RuntimeError if the reference is malformed or the secret is not found.
+    """
+    if not _is_secret_ref(ref):
+        raise ValueError(f"Not a valid secret reference: {ref!r}")
+
+    parts = ref.strip()[4:].split(":", 2)  # Remove 'ref:' prefix
+    if len(parts) < 2:
+        raise ValueError(
+            f"Invalid secret reference format: {ref!r}. "
+            "Expected: ref:<workspace_id>:<secret_name>[:<field>]"
+        )
+
+    workspace_id = parts[0] if parts[0] else None
+    secret_name = parts[1]
+    field = parts[2] if len(parts) > 2 else "value"
+
+    if not secret_name:
+        raise ValueError(f"Secret name cannot be empty in reference: {ref!r}")
+
+    # Get credential store from services
+    workspace = services.get("workspace")
+    if workspace is None:
+        raise RuntimeError(
+            f"无法解析密钥引用「{ref}」：当前运行上下文没有可用的工作区，"
+            "请先在平台凭证库中创建该密钥"
+        )
+
+    # Build the full reference key for the credential store
+    # If workspace_id is specified, use it; otherwise use the current workspace
+    if workspace_id:
+        full_ref = f"{workspace_id}:{secret_name}"
+    else:
+        # Use current workspace's credential store directly
+        from qwenpaw.drivers.credentials.store import AsyncCredentialStore
+        from pathlib import Path
+
+        workspace_dir = getattr(workspace, "local_workspace", None)
+        if workspace_dir is None:
+            raise RuntimeError(
+                f"无法解析密钥引用「{ref}」：工作区缺少 local_workspace 属性"
+            )
+        store = AsyncCredentialStore(Path(workspace_dir) / "credentials.yaml")
+
+        try:
+            record = await store.get(secret_name)
+        except Exception as exc:
+            raise RuntimeError(
+                f"平台密钥「{secret_name}」在工作区凭证库中不存在或读取失败；"
+                f"已阻止使用未配置的密钥，请先在凭证库中创建该密钥"
+            ) from exc
+
+        value = record.values.get(field)
+        if not isinstance(value, str) or not value:
+            raise RuntimeError(
+                f"平台密钥「{secret_name}」缺少字段「{field}」或该字段为空；"
+                "已阻止使用无效密钥"
+            )
+        return value
+
+    # For cross-workspace references, we'd need a different mechanism
+    # For now, only support current workspace
+    raise NotImplementedError(
+        f"跨工作区密钥引用暂不支持：{ref!r}。请仅使用当前工作区的密钥"
+    )
 
 
 _TEMPLATE_RE = re.compile(r"\{\{\s*([^{}]+?)\s*\}\}")
@@ -184,6 +273,7 @@ async def _execute_agent_node(
     on_token=None,
     live_predecessors: Optional[List[str]] = None,
     usage_out: Optional[dict] = None,
+    services: Optional[dict] = None,
 ) -> str:
     """Execute an Agent node by calling the real LLM/chat API.
 
@@ -192,10 +282,21 @@ async def _execute_agent_node(
     returned text. ``live_predecessors`` restricts the injected context to the
     branches actually taken — see :func:`_build_node_prompt`. ``usage_out``
     receives this call's token counts, for the node's own trace item.
+    ``services`` provides access to the credential store for resolving secret
+    references in ``agentId``.
     """
     config = node.get("config", {})
     agent_id = config.get("agentId", "")
     extra_prompt = config.get("extraPrompt", "")
+
+    # Resolve secret reference if agentId is a ref
+    if _is_secret_ref(agent_id):
+        if services is None:
+            raise RuntimeError(
+                f"无法解析 Agent ID 密钥引用「{agent_id}」：缺少 services 上下文，"
+                "请确保工作流运行时传入了正确的服务句柄"
+            )
+        agent_id = await _resolve_secret_ref(agent_id, services)
 
     user_input = _build_node_prompt(config, context, node_outputs, live_predecessors)
 
@@ -252,7 +353,13 @@ def _get_node_inputs(
             inputs[key] = context.get(key, "")
     elif node_type == "agent":
         config = node.get("config", {})
-        inputs["agentId"] = config.get("agentId", "")
+        agent_id = config.get("agentId", "")
+        # Record whether agentId is a secret ref, but never the actual value
+        if _is_secret_ref(agent_id):
+            inputs["agentIdRef"] = True
+            inputs["agentId"] = "ref:***"
+        else:
+            inputs["agentId"] = agent_id
         inputs["extraPrompt"] = config.get("extraPrompt", "")[:200] if config.get("extraPrompt") else ""
         bindings = _binding_refs(config)
         if bindings:
@@ -299,6 +406,30 @@ def _get_node_inputs(
         inputs["defaultBranchId"] = config.get("defaultBranchId", "")
     elif node_type == "end":
         inputs["upstream_outputs_count"] = len(node_outputs)
+    elif node_type == "code":
+        config = node.get("config", {})
+        inputs["language"] = config.get("language", "python")
+        code_snippet = config.get("code", "")
+        inputs["code_length"] = len(code_snippet) if code_snippet else 0
+    elif node_type == "llm":
+        config = node.get("config", {})
+        inputs["model"] = config.get("model", "")
+        inputs["temperature"] = config.get("temperature", 0.7)
+        inputs["maxTokens"] = config.get("maxTokens", 2000)
+        bindings = _binding_refs(config)
+        if bindings:
+            inputs["inputs"] = [{"name": a, "ref": r} for a, r in bindings]
+        if config.get("promptTemplate"):
+            inputs["promptTemplate"] = str(config["promptTemplate"])[:200]
+    elif node_type == "subflow":
+        config = node.get("config", {})
+        workflow_id = config.get("workflowId", "")
+        # Record workflowId but never expose sensitive details
+        inputs["workflowId"] = workflow_id[:100] if workflow_id else ""
+        input_mappings = config.get("inputs") or []
+        inputs["inputMappings_count"] = len(input_mappings) if isinstance(input_mappings, list) else 0
+        output_mapping = config.get("outputMapping") or {}
+        inputs["hasOutputMapping"] = bool(output_mapping)
     return inputs
 
 
@@ -408,6 +539,235 @@ _ASK_META = NodeTypeDef(
     ],
     supports_error_policy=False,
     supports_retry=False,
+)
+
+_SUBFLOW_META = NodeTypeDef(
+    type_id="subflow",
+    label="子工作流",
+    description="调用另一个已发布的工作流，支持参数传递和结果返回。",
+    icon="Workflow",
+    color="#F97316",
+    bg_color="#fff7ed",
+    border_color="#F97316",
+    properties=[
+        PropertyField(name="label", type="text", label="节点名称", default="子工作流"),
+        PropertyField(name="description", type="textarea", label="描述"),
+        PropertyField(name="workflowId", type="text", label="工作流 ID", required=True, description="要调用的目标工作流 ID"),
+        PropertyField(name="inputs", type="array", label="输入映射", description="将当前工作流的变量传递给子工作流"),
+        PropertyField(name="outputMapping", type="object", label="输出映射", description="将子工作流的输出映射到当前工作流的变量"),
+    ],
+    supports_error_policy=True,
+    supports_retry=False,
+)
+
+# ── Subflow recursion tracking ───────────────────────────────────────
+
+# Thread-local call stack for detecting recursive subflow calls
+import threading
+_subflow_call_stack = threading.local()
+
+# Global registry for mock workflows (used by tests)
+_SUBFLOW_MOCK_REGISTRY: Dict[str, Dict[str, Any]] = {}
+
+
+def _register_mock_workflow(workflow_id: str, workflow: Dict[str, Any]) -> None:
+    """Register a mock workflow for testing purposes."""
+    _SUBFLOW_MOCK_REGISTRY[workflow_id] = workflow
+
+
+def _unregister_mock_workflow(workflow_id: str) -> None:
+    """Unregister a mock workflow."""
+    _SUBFLOW_MOCK_REGISTRY.pop(workflow_id, None)
+
+
+def _clear_mock_registry() -> None:
+    """Clear all mock workflows."""
+    _SUBFLOW_MOCK_REGISTRY.clear()
+
+
+def _get_call_stack() -> List[str]:
+    """Get the current subflow call stack."""
+    if not hasattr(_subflow_call_stack, 'stack'):
+        _subflow_call_stack.stack = []
+    return _subflow_call_stack.stack
+
+
+def _push_call(workflow_id: str) -> None:
+    """Push a workflow ID onto the call stack."""
+    stack = _get_call_stack()
+    stack.append(workflow_id)
+
+
+def _pop_call() -> None:
+    """Pop a workflow ID from the call stack."""
+    stack = _get_call_stack()
+    if stack:
+        stack.pop()
+
+
+def _detect_recursion(target_wf_id: str) -> bool:
+    """Check if calling target_wf_id would cause recursion."""
+    stack = _get_call_stack()
+    return target_wf_id in stack
+
+
+# ── Workflow loading utilities ───────────────────────────────────────
+
+def _load_subflow_workflow(workflow_id: str) -> Optional[Dict[str, Any]]:
+    """Load a workflow by ID, preferring deployed version.
+    
+    This function searches for workflows in the following order:
+    1. Check the global mock registry (for testing)
+    2. Load from disk using the store module
+    3. Return None if not found
+    """
+    # First check the global mock registry
+    if workflow_id in _SUBFLOW_MOCK_REGISTRY:
+        logger.debug(f"Found mock workflow {workflow_id} in global registry")
+        return _SUBFLOW_MOCK_REGISTRY[workflow_id]
+    
+    # Try to load from disk
+    try:
+        wf = _find_workflow(workflow_id)
+        if wf:
+            # If deployed, use the deployed version snapshot
+            deployed_version_id = wf.get("deployed_version_id")
+            if deployed_version_id:
+                v = _load_version_from_disk(workflow_id,deployed_version_id)
+                if v.get("id") == deployed_version_id:
+                    return {
+                        "id": workflow_id,
+                        "name": v.get("name", ""),
+                        "description": v.get("description", ""),
+                        "nodes": v.get("nodes", []),
+                        "edges": v.get("edges", []),
+                        "system_prompt": v.get("system_prompt", ""),
+                    }
+
+            return wf
+    except Exception as exc:
+        logger.debug(f"Failed to load workflow from disk: {exc}")
+        pass
+    
+    logger.warning(f"Workflow {workflow_id} not found in mock registry or disk")
+    return None
+
+
+# ── Context isolation helpers ────────────────────────────────────────
+
+def _build_child_context(
+    parent_state,
+    inputs_mapping: List[Dict[str, str]],
+) -> Dict[str, Any]:
+    """Build an isolated context for the child workflow.
+    
+    Maps parent variables to child inputs based on the mapping configuration.
+    The child context starts fresh but includes mapped variables.
+    """
+    child_context: Dict[str, Any] = {}
+    
+    # Map parent variables to child inputs
+    for mapping in inputs_mapping:
+        if not isinstance(mapping, dict):
+            continue
+        child_var = mapping.get("name", "")
+        parent_ref = mapping.get("ref", "") or mapping.get("value", "")
+        
+        if not child_var or not parent_ref:
+            continue
+        
+        # Resolve the parent reference
+        value, found = _resolve_variable_ex(parent_ref, parent_state.context, parent_state.node_outputs)
+        if found:
+            child_context[child_var] = value
+    
+    # Always pass through user_input if not explicitly mapped
+    if "user_input" not in child_context and "user_input" in parent_state.context:
+        child_context["user_input"] = parent_state.context["user_input"]
+    
+    return child_context
+
+
+def _apply_output_mapping(
+    parent_state,
+    child_result: Dict[str, Any],
+    output_mapping: Dict[str, str],
+) -> None:
+    """Apply child workflow outputs back to parent context.
+    
+    Maps child workflow results to parent variables based on the mapping.
+    Supports both direct keys and node_{id}_output references.
+    """
+    if not isinstance(output_mapping, dict):
+        return
+    
+    for parent_var, child_ref in output_mapping.items():
+        if not parent_var or not child_ref:
+            continue
+        
+        # Try to resolve from child result
+        value = None
+        
+        # First try direct key lookup
+        if child_ref in child_result:
+            value = child_result[child_ref]
+        # Then try node_{id}_output pattern: extract node_id and look it up
+        elif child_ref.startswith("node_") and child_ref.endswith("_output"):
+            node_id = child_ref[5:-7]  # Extract node_id from "node_X_output"
+            if node_id in child_result:
+                node_out = child_result[node_id]
+                # If it's a dict with 'output' key, use that
+                if isinstance(node_out, dict) and "output" in node_out:
+                    value = node_out["output"]
+                else:
+                    value = node_out
+        
+        if value is not None:
+            parent_state.context[parent_var] = value
+            parent_state.node_outputs[parent_var] = value
+
+_CODE_META = NodeTypeDef(
+    type_id="code",
+    label="代码",
+    description="执行 Python 或 JavaScript 代码片段，支持变量注入和输出捕获。",
+    icon="Code",
+    color="#6366F1",
+    bg_color="#eef2ff",
+    border_color="#6366F1",
+    properties=[
+        PropertyField(name="label", type="text", label="节点名称", default="代码"),
+        PropertyField(name="description", type="textarea", label="描述"),
+        PropertyField(name="language", type="select", label="语言", default="python", options=[
+            {"value": "python", "label": "Python"},
+            {"value": "javascript", "label": "JavaScript"},
+        ]),
+        PropertyField(name="code", type="textarea", label="代码", required=True, description="要执行的代码片段"),
+        PropertyField(name="outputSchema", type="textarea", label="输出声明", description="JSON Schema 格式声明输出结构"),
+    ],
+    supports_error_policy=True,
+    supports_retry=True,
+)
+
+_LLM_META = NodeTypeDef(
+    type_id="llm",
+    label="大模型",
+    description="直接调用大模型 API，不依赖平台 Agent。",
+    icon="Brain",
+    color="#14B8A6",
+    bg_color="#f0fdfa",
+    border_color="#14B8A6",
+    properties=[
+        PropertyField(name="label", type="text", label="节点名称", default="大模型"),
+        PropertyField(name="description", type="textarea", label="描述"),
+        PropertyField(name="model", type="text", label="模型 ID", required=True, description="模型标识符（providerId:modelId）"),
+        PropertyField(name="systemPrompt", type="textarea", label="系统提示词", description="系统角色设定"),
+        PropertyField(name="promptTemplate", type="textarea", label="用户提示词模板", description="支持 {{variable}} 引用"),
+        PropertyField(name="temperature", type="number", label="温度", default=0.7, description="0-2 之间"),
+        PropertyField(name="maxTokens", type="number", label="最大 Token 数", default=2000),
+        PropertyField(name="outputSchema", type="textarea", label="输出声明", description="JSON Schema 格式声明输出结构"),
+    ],
+    supports_error_policy=True,
+    supports_retry=True,
 )
 
 
@@ -556,6 +916,7 @@ async def _h_agent(ctx: NodeRunContext):
                 on_token=_on_token,
                 live_predecessors=ctx.live_predecessors,
                 usage_out=usage,
+                services=ctx.services,  # Pass services for secret resolution
             )
             queue.put_nowait(("done", out))
         except Exception as exc:  # noqa: BLE001  (surfaced as a failed trace below)
@@ -842,3 +1203,741 @@ async def _h_ask(ctx: NodeRunContext):
         or "请提供输入以继续执行。"
     )
     yield RunEvent(EventType.WF_PAUSE, ctx.node_id, {"question": question})
+
+
+@register_node("subflow", metadata=_SUBFLOW_META)
+async def _h_subflow(ctx: NodeRunContext):
+    """Execute a subflow node by calling another published workflow.
+    
+    This handler implements the core subflow functionality:
+    1. Recursion detection - prevents infinite loops
+    2. Context isolation - child workflow has its own isolated context
+    3. Input mapping - maps parent variables to child inputs
+    4. Output mapping - maps child results back to parent context
+    5. Workflow loading - loads deployed version if available
+    """
+    print(f"_h_subflow CALLED: node_id={ctx.node_id}")
+    node = ctx.node
+    node_id = ctx.node_id
+    node_label = node.get("label", node_id)
+    state = ctx.state
+    config = node.get("config") or {}
+    t0 = datetime.utcnow()
+    
+    print(f"_h_subflow: config={config}")
+    
+    # Extract configuration
+    target_wf_id = config.get("workflowId", "")
+    inputs_mapping = config.get("inputs", []) or []
+    output_mapping = config.get("outputMapping", {}) or {}
+    
+    print(f"DEBUG _h_subflow: node_id={node_id}, target_wf_id={target_wf_id}")
+    print(f"DEBUG _h_subflow: config keys={list(config.keys())}")
+    
+    # Validate workflow ID
+    if not target_wf_id:
+        yield RunEvent(EventType.NODE_ERROR, node_id, {"trace": {
+            "nodeId": node_id,
+            "nodeLabel": node_label,
+            "type": "subflow",
+            "status": "failed",
+            "timestamp": t0.isoformat(),
+            "durationMs": 0,
+            "error": "工作流 ID 不能为空",
+            "message": "子工作流节点执行失败: 必须指定目标工作流 ID",
+        }})
+        return
+    
+    # Check for recursion
+    if _detect_recursion(target_wf_id):
+        call_chain = " -> ".join(_get_call_stack() + [target_wf_id])
+        yield RunEvent(EventType.NODE_ERROR, node_id, {"trace": {
+            "nodeId": node_id,
+            "nodeLabel": node_label,
+            "type": "subflow",
+            "status": "failed",
+            "timestamp": t0.isoformat(),
+            "durationMs": 0,
+            "error": f"检测到递归调用: {call_chain}",
+            "message": f"子工作流节点执行失败: 递归调用检测，调用链为 {call_chain}",
+        }})
+        return
+    
+    # Load target workflow
+    print(f"DEBUG: Loading workflow {target_wf_id}")
+    print(f"DEBUG: Registry keys: {list(_SUBFLOW_MOCK_REGISTRY.keys())}")
+    target_wf = _load_subflow_workflow(target_wf_id)
+    print(f"DEBUG: Loaded workflow: {target_wf is not None}")
+    if target_wf is None:
+        yield RunEvent(EventType.NODE_ERROR, node_id, {"trace": {
+            "nodeId": node_id,
+            "nodeLabel": node_label,
+            "type": "subflow",
+            "status": "failed",
+            "timestamp": t0.isoformat(),
+            "durationMs": 0,
+            "error": f"工作流不存在: {target_wf_id}",
+            "message": f"子工作流节点执行失败: 找不到目标工作流 {target_wf_id}",
+        }})
+        return
+    
+    # Build isolated child context with input mapping
+    child_context = _build_child_context(state, inputs_mapping)
+    
+    # Push current workflow onto call stack
+    _push_call(state.workflow_id)
+    _push_call(target_wf_id)
+    
+    try:
+        # Execute child workflow
+        result = await run_workflow_sync(
+            workflow_id=target_wf_id,
+            workflow=target_wf,
+            context=child_context,
+            services=ctx.services,
+        )
+        
+        duration_ms = int((datetime.utcnow() - t0).total_seconds() * 1000)
+        
+        # Check if child execution succeeded
+        if not result.get("success"):
+            error_detail = result.get("detail", "子工作流执行失败")
+            yield RunEvent(EventType.NODE_ERROR, node_id, {"trace": {
+                "nodeId": node_id,
+                "nodeLabel": node_label,
+                "type": "subflow",
+                "status": "failed",
+                "timestamp": t0.isoformat(),
+                "durationMs": duration_ms,
+                "error": error_detail[:500],
+                "message": f"子工作流节点执行失败: {error_detail[:200]}",
+            }})
+            return
+        
+        # Extract child workflow result
+        child_data = result.get("data", {})
+        child_status = child_data.get("status", "")
+        
+        # Try to extract the last non-start/end node's output from node_outputs
+        child_node_outputs = child_data.get("node_outputs", {})
+        if child_node_outputs:
+            # Filter out start and end nodes, get the last one
+            meaningful_outputs = {
+                nid: out for nid, out in child_node_outputs.items()
+                if not nid.endswith("_start") and not nid.endswith("_end") 
+                and nid != "start" and nid != "end"
+            }
+            if meaningful_outputs:
+                # Get the last value (by insertion order)
+                child_result_text = list(meaningful_outputs.values())[-1]
+                # If it's a dict with 'output' key, use that
+                if isinstance(child_result_text, dict) and "output" in child_result_text:
+                    child_result_text = child_result_text["output"]
+            else:
+                # Fallback to formatted result
+                child_result_text = child_data.get("result", "")
+        else:
+            # Fallback to formatted result
+            child_result_text = child_data.get("result", "")
+        
+        # Apply output mapping
+        if output_mapping and child_status == "completed":
+            # Pass the full child_node_outputs so _apply_output_mapping can resolve references
+            _apply_output_mapping(
+                state,
+                child_node_outputs or {},
+                output_mapping,
+            )
+        
+        # Set the subflow node's output to the child's result
+        state.node_outputs[node_id] = child_result_text
+        state.context[f"node_{node_id}_output"] = child_result_text
+        
+        # Emit success event
+        yield RunEvent(EventType.NODE_DONE, node_id, {"trace": {
+            "nodeId": node_id,
+            "nodeLabel": node_label,
+            "type": "subflow",
+            "status": "completed",
+            "timestamp": t0.isoformat(),
+            "durationMs": duration_ms,
+            "inputs": _get_node_inputs("subflow", node, state.context, state.node_outputs),
+            "output": child_result_text[:500] if isinstance(child_result_text, str) else str(child_result_text)[:500],
+            "message": f"子工作流执行完成 ({duration_ms}ms)",
+        }})
+        
+    finally:
+        # Always pop from call stack, even on error
+        _pop_call()  # Pop target_wf_id
+        _pop_call()  # Pop parent workflow_id
+
+
+@register_node("code", metadata=_CODE_META)
+async def _h_code(ctx: NodeRunContext):
+    """Execute user-provided Python or JavaScript code.
+
+    Python code runs in a restricted environment with access only to injected
+    variables from upstream nodes. JavaScript support is stubbed for now.
+    """
+    node = ctx.node
+    node_id = ctx.node_id
+    node_label = node.get("label", node_id)
+    state = ctx.state
+    config = node.get("config") or {}
+    t0 = datetime.utcnow()
+
+    language = config.get("language", "python").lower()
+    code = config.get("code", "")
+
+    if not code.strip():
+        yield RunEvent(EventType.NODE_ERROR, node_id, {"trace": {
+            "nodeId": node_id,
+            "nodeLabel": node_label,
+            "type": "code",
+            "status": "failed",
+            "timestamp": t0.isoformat(),
+            "durationMs": 0,
+            "error": "代码为空",
+            "message": "代码节点执行失败: 代码不能为空",
+        }})
+        return
+
+    # Build execution context with upstream outputs
+    exec_globals = {
+        "__builtins__": __builtins__,
+        "json": json,
+        "datetime": datetime,
+    }
+    # Inject upstream node outputs as variables
+    for nid, output in state.node_outputs.items():
+        var_name = f"node_{nid}_output"
+        exec_globals[var_name] = output
+    # Also inject context variables
+    for key, value in state.context.items():
+        if key.startswith("node_") or key in SYSTEM_VARIABLE_KEYS:
+            exec_globals[key] = value
+
+    output = None
+    error = None
+    try:
+        if language == "python":
+            # Execute Python code
+            exec(code, exec_globals)
+            # Capture output: look for 'result' variable or last expression
+            output = exec_globals.get("result", exec_globals.get("output", ""))
+        elif language == "javascript":
+            # JavaScript execution is not supported yet — fail loudly
+            raise NotImplementedError(
+                "JavaScript 代码执行暂不支持，请使用 Python"
+            )
+        else:
+            raise ValueError(f"不支持的编程语言: {language}")
+    except Exception as exc:  # noqa: BLE001
+        error = str(exc) or f"{type(exc).__name__}: 代码执行异常"
+
+    duration_ms = int((datetime.utcnow() - t0).total_seconds() * 1000)
+
+    if error:
+        yield RunEvent(EventType.NODE_ERROR, node_id, {"trace": {
+            "nodeId": node_id,
+            "nodeLabel": node_label,
+            "type": "code",
+            "status": "failed",
+            "timestamp": t0.isoformat(),
+            "durationMs": duration_ms,
+            "inputs": _get_node_inputs("code", node, state.context, state.node_outputs),
+            "error": error[:500],
+            "message": f"代码节点执行失败: {error[:200]}",
+        }})
+        return
+
+    # Validate against output schema if declared
+    schema_fields, schema_errors = parse_output_schema(config.get("outputSchema"))
+    published: Any = output
+    if schema_fields:
+        if isinstance(output, str):
+            parsed, ok = parse_json_output(output)
+            if ok:
+                normalized, field_errors = validate_output(parsed, schema_fields)
+                if field_errors:
+                    yield RunEvent(EventType.NODE_ERROR, node_id, {"trace": {
+                        "nodeId": node_id, "nodeLabel": node_label, "type": "code",
+                        "status": "failed", "timestamp": t0.isoformat(),
+                        "durationMs": duration_ms,
+                        "inputs": _get_node_inputs("code", node, state.context, state.node_outputs),
+                        "rawOutput": output[:500],
+                        "schemaErrors": field_errors,
+                        "error": "; ".join(field_errors)[:500],
+                        "message": f"代码节点输出不符合声明: {field_errors[0]}",
+                    }})
+                    return
+                published = normalized
+            else:
+                yield RunEvent(EventType.NODE_ERROR, node_id, {"trace": {
+                    "nodeId": node_id, "nodeLabel": node_label, "type": "code",
+                    "status": "failed", "timestamp": t0.isoformat(),
+                    "durationMs": duration_ms,
+                    "inputs": _get_node_inputs("code", node, state.context, state.node_outputs),
+                    "rawOutput": output[:500],
+                    "schemaErrors": ["输出不是合法 JSON，无法按声明的字段校验"],
+                    "error": "输出不是合法 JSON",
+                    "message": "代码节点输出不符合声明: 输出不是合法 JSON",
+                }})
+                return
+        else:
+            normalized, field_errors = validate_output(output, schema_fields)
+            if field_errors:
+                yield RunEvent(EventType.NODE_ERROR, node_id, {"trace": {
+                    "nodeId": node_id, "nodeLabel": node_label, "type": "code",
+                    "status": "failed", "timestamp": t0.isoformat(),
+                    "durationMs": duration_ms,
+                    "inputs": _get_node_inputs("code", node, state.context, state.node_outputs),
+                    "rawOutput": str(output)[:500],
+                    "schemaErrors": field_errors,
+                    "error": "; ".join(field_errors)[:500],
+                    "message": f"代码节点输出不符合声明: {field_errors[0]}",
+                }})
+                return
+            published = normalized
+
+    state.node_outputs[node_id] = published
+    state.context[f"node_{node_id}_output"] = published
+    state.node_outputs_history.setdefault(node_id, []).append(published)
+
+    yield RunEvent(EventType.NODE_DONE, node_id, {"trace": {
+        "nodeId": node_id,
+        "nodeLabel": node_label,
+        "type": "code",
+        "status": "completed",
+        "timestamp": t0.isoformat(),
+        "durationMs": duration_ms,
+        "inputs": _get_node_inputs("code", node, state.context, state.node_outputs),
+        "output": str(published)[:500] if published else "",
+        "message": f"代码节点执行完成 ({duration_ms}ms)",
+    }})
+
+
+@register_node("llm", metadata=_LLM_META)
+async def _h_llm(ctx: NodeRunContext):
+    """Call an LLM directly without going through the platform Agent layer.
+
+    Supports configurable model, temperature, max_tokens, system prompt, and
+    user prompt template with variable interpolation.
+    """
+    node = ctx.node
+    node_id = ctx.node_id
+    node_label = node.get("label", node_id)
+    state = ctx.state
+    config = node.get("config") or {}
+    t0 = datetime.utcnow()
+
+    model = config.get("model", "")
+    if not model:
+        yield RunEvent(EventType.NODE_ERROR, node_id, {"trace": {
+            "nodeId": node_id,
+            "nodeLabel": node_label,
+            "type": "llm",
+            "status": "failed",
+            "timestamp": t0.isoformat(),
+            "durationMs": 0,
+            "error": "模型 ID 未配置",
+            "message": "大模型节点执行失败: 必须配置模型 ID（格式：providerId:modelId）",
+        }})
+        return
+
+    system_prompt = config.get("systemPrompt", "")
+    prompt_template = config.get("promptTemplate", "")
+    temperature = float(config.get("temperature", 0.7))
+    max_tokens = int(config.get("maxTokens", 2000))
+
+    # Build user message from template
+    user_input = _build_node_prompt(
+        config, state.context, state.node_outputs, ctx.live_predecessors
+    )
+
+    # Construct messages
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": user_input})
+
+    # Call LLM via llm_client
+    usage: dict = {}
+    try:
+        result = await _call_agent_chat(
+            model,  # Use model ID directly as agent_id parameter
+            messages,
+            on_token=None,
+            usage_out=usage,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+    except Exception as exc:  # noqa: BLE001
+        error = str(exc) or f"{type(exc).__name__}: LLM 调用异常"
+        yield RunEvent(EventType.NODE_ERROR, node_id, {"trace": {
+            "nodeId": node_id,
+            "nodeLabel": node_label,
+            "type": "llm",
+            "status": "failed",
+            "timestamp": t0.isoformat(),
+            "durationMs": int((datetime.utcnow() - t0).total_seconds() * 1000),
+            "inputs": _get_node_inputs("llm", node, state.context, state.node_outputs),
+            "error": error[:500],
+            "message": f"大模型节点执行失败: {error[:200]}",
+        }})
+        return
+
+    duration_ms = int((datetime.utcnow() - t0).total_seconds() * 1000)
+
+    # Validate against output schema if declared
+    schema_fields, schema_errors = parse_output_schema(config.get("outputSchema"))
+    published: Any = result
+    if schema_fields:
+        parsed, ok = parse_json_output(result)
+        if not ok:
+            yield RunEvent(EventType.NODE_ERROR, node_id, {"trace": {
+                "nodeId": node_id, "nodeLabel": node_label, "type": "llm",
+                "status": "failed", "timestamp": t0.isoformat(),
+                "durationMs": duration_ms,
+                "inputs": _get_node_inputs("llm", node, state.context, state.node_outputs),
+                "rawOutput": result[:500],
+                "schemaErrors": ["输出不是合法 JSON，无法按声明的字段校验"],
+                "error": "输出不是合法 JSON",
+                "message": "大模型节点输出不符合声明: 输出不是合法 JSON",
+            }})
+            return
+        normalized, field_errors = validate_output(parsed, schema_fields)
+        if field_errors:
+            yield RunEvent(EventType.NODE_ERROR, node_id, {"trace": {
+                "nodeId": node_id, "nodeLabel": node_label, "type": "llm",
+                "status": "failed", "timestamp": t0.isoformat(),
+                "durationMs": duration_ms,
+                "inputs": _get_node_inputs("llm", node, state.context, state.node_outputs),
+                "rawOutput": result[:500],
+                "schemaErrors": field_errors,
+                "error": "; ".join(field_errors)[:500],
+                "message": f"大模型节点输出不符合声明: {field_errors[0]}",
+            }})
+            return
+        published = normalized
+
+    state.node_outputs[node_id] = published
+    state.context[f"node_{node_id}_output"] = published
+    state.node_outputs_history.setdefault(node_id, []).append(published)
+
+    yield RunEvent(EventType.NODE_DONE, node_id, {"trace": {
+        "nodeId": node_id,
+        "nodeLabel": node_label,
+        "type": "llm",
+        "status": "completed",
+        "timestamp": t0.isoformat(),
+        "durationMs": duration_ms,
+        "inputs": _get_node_inputs("llm", node, state.context, state.node_outputs),
+        "output": str(published)[:500] if published else "",
+        **usage,
+        "message": f"大模型节点执行完成 ({duration_ms}ms)",
+    }})
+
+
+# ── Loop container helpers ────────────────────────────────────────────
+
+_LOOP_TEMPLATE_RE = re.compile(r"\{\{\s*([^\{\}]+?)\s*\}\}")
+
+
+def _extract_loop_body(workflow: Dict[str, Any], loop_node_id: str) -> Tuple[List[dict], List[dict]]:
+    """Extract loop body nodes and internal edges for a loop container.
+
+    Loop body nodes are identified by ``parentId == loop_node_id``.
+    Internal edges are those whose both endpoints lie inside the loop body.
+    """
+    nodes = workflow.get("nodes", [])
+    edges = workflow.get("edges", [])
+
+    body_nodes = [n for n in nodes if n.get("parentId") == loop_node_id]
+    body_node_ids = {n["id"] for n in body_nodes}
+
+    body_edges = []
+    for edge in edges:
+        if edge.get("source") in body_node_ids and edge.get("target") in body_node_ids:
+            body_edges.append(dict(edge))
+
+    return body_nodes, body_edges
+
+
+def _build_loop_sub_workflow(body_nodes: List[dict], body_edges: List[dict]) -> Dict[str, Any]:
+    """Build a sub-workflow with virtual start/end nodes for the loop body.
+
+    Virtual nodes ensure the loop body can be executed by a standalone
+    :class:`WorkflowRunner` without relying on the parent runner's
+    scheduler state.
+    """
+    # Copy edges to avoid mutating the caller's list
+    edges = list(body_edges)
+    body_node_ids = {n["id"] for n in body_nodes}
+
+    # Entry nodes: no incoming edges within the loop body
+    incoming_targets = {e["target"] for e in edges}
+    entry_nodes = [n for n in body_nodes if n["id"] not in incoming_targets]
+
+    # Exit nodes: no outgoing edges within the loop body
+    outgoing_sources = {e["source"] for e in edges}
+    exit_nodes = [n for n in body_nodes if n["id"] not in outgoing_sources]
+
+    virtual_start = {"id": "_loop_start", "type": "start", "label": "循环开始"}
+    virtual_end = {"id": "_loop_end", "type": "end", "label": "循环结束"}
+
+    for entry in entry_nodes:
+        edges.append({"source": virtual_start["id"], "target": entry["id"]})
+    for exit_node in exit_nodes:
+        edges.append({"source": exit_node["id"], "target": virtual_end["id"]})
+
+    return {
+        "nodes": [virtual_start, virtual_end] + body_nodes,
+        "edges": edges,
+    }
+
+
+def _evaluate_while_condition(condition: str, context: Dict[str, Any]) -> bool:
+    """Evaluate a while loop condition expression.
+
+    Supports ``{{ var_name }}`` substitution (same syntax as prompt templates).
+    The expression is evaluated in a restricted ``eval`` sandbox.
+    """
+    if not condition:
+        return False
+
+    def _replace_var(match: Any) -> str:
+        var_name = match.group(1).strip()
+        value = context.get(var_name, "")
+        if isinstance(value, bool):
+            return str(value)
+        if isinstance(value, (int, float)):
+            return str(value)
+        if isinstance(value, str):
+            return repr(value)
+        return repr(value)
+
+    try:
+        expr = _LOOP_TEMPLATE_RE.sub(_replace_var, condition)
+        return bool(eval(expr, {"__builtins__": {}}, {}))  # noqa: S307
+    except Exception:
+        return False
+
+
+# ── Loop container node metadata ──────────────────────────────────────
+
+_FOR_EACH_META = NodeTypeDef(
+    type_id="for_each",
+    label="For Each",
+    description="遍历数组，每次迭代执行内部子图。",
+    icon="Repeat",
+    color="#10B981",
+    bg_color="#ecfdf5",
+    border_color="#10B981",
+    properties=[
+        PropertyField(name="label", type="text", label="节点名称", default="For Each"),
+        PropertyField(name="iterateOver", type="text", label="遍历变量", required=True, description="要遍历的数组变量名"),
+        PropertyField(name="loopVariable", type="text", label="循环变量", default="item", description="每次迭代中的变量名"),
+        PropertyField(name="maxIterations", type="number", label="最大迭代次数", default=100),
+    ],
+    supports_error_policy=False,
+    supports_retry=False,
+)
+
+_WHILE_META = NodeTypeDef(
+    type_id="while",
+    label="While",
+    description="条件为真时重复执行内部子图。",
+    icon="RotateCcw",
+    color="#8B5CF6",
+    bg_color="#f5f3ff",
+    border_color="#8B5CF6",
+    properties=[
+        PropertyField(name="label", type="text", label="节点名称", default="While"),
+        PropertyField(name="condition", type="textarea", label="条件表达式", required=True, description="返回 true/false 的表达式，例如：{{ count }} < 10"),
+        PropertyField(name="maxIterations", type="number", label="最大迭代次数", default=100),
+    ],
+    supports_error_policy=False,
+    supports_retry=False,
+)
+
+
+@register_node("for_each", metadata=_FOR_EACH_META)
+async def _h_for_each(ctx: NodeRunContext):
+    """Execute a for-each loop node.
+
+    Each iteration runs the loop body as an isolated sub-workflow via a
+    child :class:`WorkflowRunner`.  Outputs are prefixed with iteration
+    info to avoid key collisions in the parent state.
+    """
+    node = ctx.node
+    node_id = ctx.node_id
+    state = ctx.state
+    config = node.get("config", {})
+
+    iterate_over = config.get("iterateOver", "")
+    loop_var = config.get("loopVariable", "item")
+    max_iterations = config.get("maxIterations", 100)
+
+    items = state.context.get(iterate_over, [])
+    if not isinstance(items, list):
+        items = []
+
+    body_nodes, body_edges = _extract_loop_body(ctx.workflow, node_id)
+
+    if not body_nodes:
+        state.node_outputs[node_id] = {"iterations": 0, "lastResult": None}
+        yield RunEvent(EventType.NODE_DONE, node_id, {"trace": {
+            "nodeId": node_id,
+            "nodeLabel": node.get("label", node_id),
+            "type": "for_each",
+            "status": "completed",
+            "timestamp": datetime.utcnow().isoformat(),
+            "durationMs": 0,
+            "output": state.node_outputs[node_id],
+            "message": "For Each 节点执行完成（无循环体）",
+        }})
+        return
+
+    sub_workflow = _build_loop_sub_workflow(body_nodes, body_edges)
+
+    total_iterations = 0
+    last_result = None
+
+    for i, item in enumerate(items[:max_iterations]):
+        total_iterations += 1
+        state.context[loop_var] = item
+
+        sub_state = ExecutionState(
+            execution_id=f"{state.execution_id}_loop_{i}",
+            workflow_id=state.workflow_id,
+            context=dict(state.context),
+        )
+
+        sub_runner = WorkflowRunner(sub_workflow, sub_state, services=ctx.services)
+
+        async for event in sub_runner.run():
+            yield event
+
+        # Merge context updates from sub runner back to parent state
+        state.context.update(sub_state.context)
+
+        # Merge outputs with iteration prefix to avoid collisions
+        for key, value in sub_state.node_outputs.items():
+            state.node_outputs[f"{node_id}_{key}_{i}"] = value
+
+        # Merge trace items with prefixed node ids
+        for trace_item in sub_state.trace_items:
+            prefixed = dict(trace_item)
+            prefixed["nodeId"] = f"{node_id}/{prefixed.get('nodeId', '')}"
+            prefixed["nodeLabel"] = f"[迭代 {i}] {prefixed.get('nodeLabel', '')}"
+            state.trace_items.append(prefixed)
+
+        last_result = sub_state.result
+
+    # Clean up loop variable to avoid polluting downstream nodes
+    state.context.pop(loop_var, None)
+
+    state.node_outputs[node_id] = {
+        "iterations": total_iterations,
+        "lastResult": last_result,
+    }
+
+    yield RunEvent(EventType.NODE_DONE, node_id, {"trace": {
+        "nodeId": node_id,
+        "nodeLabel": node.get("label", node_id),
+        "type": "for_each",
+        "status": "completed",
+        "timestamp": datetime.utcnow().isoformat(),
+        "durationMs": 0,
+        "output": state.node_outputs[node_id],
+        "message": f"For Each 节点执行完成（共 {total_iterations} 次迭代）",
+    }})
+
+
+@register_node("while", metadata=_WHILE_META)
+async def _h_while(ctx: NodeRunContext):
+    """Execute a while loop node.
+
+    Evaluates the condition before each iteration.  The loop body is run
+    as an isolated sub-workflow, exactly like :func:`_h_for_each`.
+    """
+    node = ctx.node
+    node_id = ctx.node_id
+    state = ctx.state
+    config = node.get("config", {})
+
+    condition = config.get("condition", "")
+    max_iterations = config.get("maxIterations", 100)
+
+    body_nodes, body_edges = _extract_loop_body(ctx.workflow, node_id)
+
+    if not body_nodes:
+        state.node_outputs[node_id] = {"iterations": 0, "lastResult": None}
+        yield RunEvent(EventType.NODE_DONE, node_id, {"trace": {
+            "nodeId": node_id,
+            "nodeLabel": node.get("label", node_id),
+            "type": "while",
+            "status": "completed",
+            "timestamp": datetime.utcnow().isoformat(),
+            "durationMs": 0,
+            "output": state.node_outputs[node_id],
+            "message": "While 节点执行完成（无循环体）",
+        }})
+        return
+
+    sub_workflow = _build_loop_sub_workflow(body_nodes, body_edges)
+
+    total_iterations = 0
+    last_result = None
+
+    for i in range(max_iterations):
+        should_continue = _evaluate_while_condition(condition, state.context)
+        if not should_continue:
+            break
+
+        total_iterations += 1
+
+        sub_state = ExecutionState(
+            execution_id=f"{state.execution_id}_loop_{i}",
+            workflow_id=state.workflow_id,
+            context=dict(state.context),
+        )
+
+        sub_runner = WorkflowRunner(sub_workflow, sub_state, services=ctx.services)
+
+        async for event in sub_runner.run():
+            yield event
+
+        # Merge context updates from sub runner back to parent state
+        state.context.update(sub_state.context)
+
+        for key, value in sub_state.node_outputs.items():
+            state.node_outputs[f"{node_id}_{key}_{i}"] = value
+
+        for trace_item in sub_state.trace_items:
+            prefixed = dict(trace_item)
+            prefixed["nodeId"] = f"{node_id}/{prefixed.get('nodeId', '')}"
+            prefixed["nodeLabel"] = f"[迭代 {i}] {prefixed.get('nodeLabel', '')}"
+            state.trace_items.append(prefixed)
+
+        last_result = sub_state.result
+
+    state.node_outputs[node_id] = {
+        "iterations": total_iterations,
+        "lastResult": last_result,
+    }
+
+    yield RunEvent(EventType.NODE_DONE, node_id, {"trace": {
+        "nodeId": node_id,
+        "nodeLabel": node.get("label", node_id),
+        "type": "while",
+        "status": "completed",
+        "timestamp": datetime.utcnow().isoformat(),
+        "durationMs": 0,
+        "output": state.node_outputs[node_id],
+        "message": f"While 节点执行完成（共 {total_iterations} 次迭代）",
+    }})
+
+
+

@@ -135,3 +135,12 @@ def list_node_type_defs() -> List[NodeTypeDef]:
 def registered_types() -> set:
     """Return the set of currently registered node type ids."""
     return set(_REGISTRY.keys())
+
+
+def get_node_metadata(type_id: str) -> Optional[NodeTypeDef]:
+    """Alias for get_node_type_def - returns metadata for a node type.
+    
+    This is provided for backwards compatibility with tests that expect
+    this function name.
+    """
+    return get_node_type_def(type_id)
