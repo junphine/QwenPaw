@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import hashlib
 import os
@@ -37,6 +38,37 @@ if TYPE_CHECKING:
     from ...config.config import Config
 
 logger = logging.getLogger(__name__)
+
+# A channel that overrides ``send_event`` with the older four-argument form
+# rejects the ``dispatched`` keyword. Probing is memoised per class so the
+# dispatch path does not pay for it on every event.
+_DISPATCHED_SUPPORT: Dict[type, bool] = {}
+
+
+def _accepts_dispatched(channel: Any) -> bool:
+    """Return whether *channel*'s ``send_event`` declares ``dispatched``."""
+    cls = type(channel)
+    cached = _DISPATCHED_SUPPORT.get(cls)
+    if cached is not None:
+        return cached
+    handler = getattr(cls, "send_event", None)
+    if handler is None:
+        _DISPATCHED_SUPPORT[cls] = False
+        return False
+    try:
+        parameters = inspect.signature(handler).parameters
+    except (TypeError, ValueError):
+        parameters = {}
+    # A channel that forwards ``**kwargs`` to ``BaseChannel.send_event``
+    # accepts the mapping just as one that names it, and it still dedupes
+    # per turn. Only a signature that can accept neither is left out.
+    accepts = "dispatched" in parameters or any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD
+        for parameter in parameters.values()
+    )
+    _DISPATCHED_SUPPORT[cls] = accepts
+    return accepts
+
 
 # Callback when user reply was sent: (channel, user_id, session_id)
 OnLastDispatch = Optional[Callable[[str, str, str], Awaitable[None]]]
@@ -354,6 +386,14 @@ def instantiate_channel(
     from .registry import selected_process_channels
 
     plugin_registry = PluginRegistry()
+    show_tool_details = getattr(workspace_config, "show_tool_details", None)
+    if show_tool_details is None:
+        from ...config import load_config
+
+        # Dynamic plugin projection receives an agent profile, whereas initial
+        # service construction supplies a merged Config. Keep the root policy
+        # in both paths instead of silently enabling hidden tool details.
+        show_tool_details = load_config().show_tool_details
     if key in selected_process_channels():
         if context is None or context.prepared is None:
             raise RuntimeError("CHANNEL_PREPARATION_STALE")
@@ -372,11 +412,16 @@ def instantiate_channel(
         )
         from ...plugins.ownership import RuntimeKey, RuntimeStopReceipt
 
-        identity_claims = ()
+        from ...plugins.channel_config import channel_resource_claims
+
+        identity_claims = channel_resource_claims(
+            row.description_record.descriptor.config_schema,
+            prepared_config.config,
+        )
         if key == "voice":
             from .conflict import get_channel_bot_identity
 
-            identity_claims = tuple(
+            identity_claims += tuple(
                 ("channel:voice:" + name, value)
                 for name, value in (
                     get_channel_bot_identity(key, ch_cfg) or ()
@@ -419,14 +464,11 @@ def instantiate_channel(
                 instance_id=instance_id,
                 generation=lease.generation,
                 workspace_dir=workspace_dir,
+                workspace_id=context.configured_id,
                 on_reply_sent=on_last_dispatch,
                 display_config=ChannelDisplayConfig.from_config(
                     ch_cfg,
-                    show_tool_details=getattr(
-                        workspace_config,
-                        "show_tool_details",
-                        True,
-                    ),
+                    show_tool_details=show_tool_details,
                 ),
                 no_text_debounce=getattr(ch_cfg, "no_text_debounce", True),
                 startup_timeout=settings.startup_timeout,
@@ -464,11 +506,6 @@ def instantiate_channel(
     ch_cfg = channel_cfg_for_key(workspace_config, key)
     if ch_cfg is None:
         raise RuntimeError(f"No config found for channel '{key}'")
-    show_tool_details = getattr(
-        workspace_config,
-        "show_tool_details",
-        True,
-    )
     no_text_debounce = getattr(ch_cfg, "no_text_debounce", True)
     from_config_kwargs: dict[str, Any] = {
         "process": process,
@@ -639,7 +676,9 @@ class ChannelManager:  # pylint: disable=too-many-public-methods
         self._workspace_config: Any = None
 
         # New unified queue system
-        self._command_registry = CommandRegistry()
+        self._command_registry = CommandRegistry(
+            control_resolver=self._is_sdk_control,
+        )
         self._queue_manager: UnifiedQueueManager | None = None
         self._workspace = None
 
@@ -704,6 +743,13 @@ class ChannelManager:  # pylint: disable=too-many-public-methods
                 expected=self._channel_handle(old),
                 token=handle,
             )
+
+    def _is_sdk_control(self, query: str) -> bool:
+        """Read the live workspace declaration, avoiding duplicate registrations."""
+        plugins = getattr(self._workspace, "plugins", None)
+        registry = getattr(plugins, "slash_command_registry", None)
+        match = registry.resolve(query) if registry is not None else None
+        return bool(match and match[0].metadata.get("sdk_control") is True)
 
     def register_control_command(
         self,
@@ -2047,6 +2093,7 @@ class ChannelManager:  # pylint: disable=too-many-public-methods
         session_id: str,
         event: Any,
         meta: Optional[Dict[str, Any]] = None,
+        dispatched: Optional[Dict[str, Any]] = None,
     ) -> None:
         ch = await self.get_channel(channel)
         if not ch:
@@ -2061,12 +2108,21 @@ class ChannelManager:  # pylint: disable=too-many-public-methods
         )
         if bot_prefix and "bot_prefix" not in merged_meta:
             merged_meta["bot_prefix"] = bot_prefix
-        await ch.send_event(
-            user_id=user_id,
-            session_id=session_id,
-            event=event,
-            meta=merged_meta,
-        )
+        dispatch_kwargs: Dict[str, Any] = {
+            "user_id": user_id,
+            "session_id": session_id,
+            "event": event,
+            "meta": merged_meta,
+        }
+        # ``dispatched`` belongs to BaseChannel's signature, but a channel
+        # overriding ``send_event`` with the older form rejects it — passing
+        # it unconditionally turned every ordinary call into a ``TypeError``
+        # for those channels. Hand it over only where it is declared; such a
+        # channel then simply sends its notices without the per-turn
+        # deduplication it never had.
+        if dispatched is not None and _accepts_dispatched(ch):
+            dispatch_kwargs["dispatched"] = dispatched
+        await ch.send_event(**dispatch_kwargs)
 
     async def send_text(
         self,
