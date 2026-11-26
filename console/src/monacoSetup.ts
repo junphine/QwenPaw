@@ -55,3 +55,26 @@ registerRobotFramework(monaco);
 
 // Use the locally bundled monaco instance instead of loading it from the CDN.
 loader.config({ monaco });
+
+/**
+ * Hand the *same* instance to `window.QwenPaw.host.monaco` (see
+ * `plugins/hostExternals.ts`) so plugin bundles never have to `import
+ * "monaco-editor"` themselves — a second copy would ship its own workers and
+ * miss the `MonacoEnvironment` / language registration done above.
+ *
+ * Bridged through a global instead of an import so `installHostExternals()`
+ * stays free of the `editor-vendor` chunk (it would otherwise be pulled into
+ * the first-paint graph). Populated whenever this module is evaluated, i.e.
+ * the first time the coding / files editor chunk loads.
+ */
+interface QwenPawMonacoBridge {
+  monaco: typeof monaco;
+}
+
+declare global {
+  interface Window {
+    __QwenPawMonaco?: QwenPawMonacoBridge;
+  }
+}
+
+window.__QwenPawMonaco = { monaco };

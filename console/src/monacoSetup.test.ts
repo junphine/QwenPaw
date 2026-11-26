@@ -238,3 +238,20 @@ describe("monacoSetup - loader and language registration", () => {
     );
   });
 });
+
+describe("monacoSetup - host bridge", () => {
+  it("publishes the same instance the loader and editors use", async () => {
+    const monacoNamespace = await loadSetup();
+
+    // `window.QwenPaw.host.monaco` / `getMonaco()` read this global. It must be
+    // the module's own namespace — a different object would mean plugins get a
+    // second Monaco copy without the workers wired here.
+    expect(
+      (window as unknown as { __QwenPawMonaco?: { monaco: unknown } })
+        .__QwenPawMonaco?.monaco,
+    ).toBe(monacoNamespace);
+    expect(workers.loaderConfig).toHaveBeenCalledWith({
+      monaco: monacoNamespace,
+    });
+  });
+});

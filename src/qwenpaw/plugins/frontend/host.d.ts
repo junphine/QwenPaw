@@ -307,6 +307,13 @@ export interface QwenPawHostNamespace {
   prepareBrowserSession(appId: string): Promise<number | null>;
   usesBrowserSession(appId: string): boolean;
 
+  /** Bundled Monaco instance; loaded on first use of the coding / files editor. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  readonly monaco?: any;
+  /** Load Monaco on demand and resolve with the instanceof the host editors use. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  getMonaco(): Promise<any>;
+
   // ── Hooks (call only inside plugin-supplied React components) ─────────────
   useTheme(): HostThemeMode;
   useLocale(): string;

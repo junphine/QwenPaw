@@ -64,6 +64,10 @@ export interface HostExternals {
   getApiToken: typeof getApiToken;
   prepareBrowserSession: typeof prepareBrowserSession;
   usesBrowserSession: typeof usesBrowserSession;
+  /** Bundled Monaco instance. Set once the coding / files editor chunk has loaded. */
+  monaco?: typeof import("monaco-editor");
+  /** Load the editor chunk on demand, then resolve with that same instance. */
+  getMonaco: () => Promise<typeof import("monaco-editor")>;
   // ── Hooks + helpers attached later by installHostSdk() ─────────────────────
   useTheme?: () => HostThemeMode;
   useLocale?: () => string;
@@ -277,6 +281,15 @@ export function installHostExternals(): void {
       getApiToken,
       prepareBrowserSession,
       usesBrowserSession,
+      get monaco() {
+        return window.__QwenPawMonaco?.monaco;
+      },
+      getMonaco: async () => {
+        // Same module instance the editors import, so Rollup evaluates
+        // monacoSetup.ts at most once and the loader/workers stay wired.
+        if (!window.__QwenPawMonaco) await import("../monacoSetup");
+        return window.__QwenPawMonaco!.monaco;
+      },
     };
   }
 

@@ -122,9 +122,11 @@ async function executePluginScript(plugin: FrontendPluginInfo): Promise<void> {
   }
   if (!canExecute(plugin))
     throw new Error(`Plugin became unavailable before execution: ${plugin.id}`);
-  const blobUrl = URL.createObjectURL(
-    new Blob([source], { type: "application/javascript" }),
-  );
+  // modify@byron
+  //const blobUrl = URL.createObjectURL(
+  //  new Blob([source], { type: "application/javascript" }),
+  //);
+  const blobUrl = "data:text/javascript;charset=utf-8," + encodeURIComponent(source);
   try {
     await import(/* @vite-ignore */ blobUrl);
   } finally {
