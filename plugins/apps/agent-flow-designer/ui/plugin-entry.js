@@ -153,19 +153,7 @@
   // 侧边栏快捷入口：宿主不会为 /apps/ 路由自动生成菜单项，
   // 需另注册一条非 /apps/ 路由并用 menu.add 挂到侧边栏。
   try {
-    if (QwenPaw.menu && QwenPaw.route) {
-      QwenPaw.menu.add(pluginId, {
-        id: "agent-flow-designer.entry",
-        label: "AFD",
-        icon: React.createElement(
-          "span",
-          { style: { fontSize: 16 } },
-          "🧩"
-        ),
-        route: "agent-flow-designer.page",
-        location: "primary.agentScoped",
-        order: 20,
-      });
+    if (QwenPaw.route) {
       QwenPaw.route.add(pluginId, {
         id: "agent-flow-designer.page",
         path: "/agent-flow-designer",
