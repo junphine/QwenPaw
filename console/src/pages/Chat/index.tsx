@@ -4559,18 +4559,22 @@ export default function ChatPage() {
               agentTransition={isSessionTransition}
             />
             <ComposerAccessibilityLabels />
-            <ChatHeaderTitle />
-            <span className={styles.headerSpacer} />
-            <ChatActionGroup
+            <ChatHeaderTitle
+              actions={
+                <>
+                  <ChatActionGroup
               onNewChat={handleNewChat}
-              onToggleTerminal={toggleTerminal}
-              terminalEnabled={terminalEnabled}
-              terminalDisabledReason={terminalDisabledReason}
-              terminalOpen={terminalOpen}
-              onToggleWorkspace={toggleFilesWorkspace}
-              workspaceOpen={filesWorkspaceOpen}
+                    onToggleTerminal={toggleTerminal}
+                    terminalEnabled={terminalEnabled}
+                    terminalDisabledReason={terminalDisabledReason}
+                    terminalOpen={terminalOpen}
+                    onToggleWorkspace={toggleFilesWorkspace}
+                    workspaceOpen={filesWorkspaceOpen}
+                  />
+                  {pluginRightHeader}
+                </>
+              }
             />
-            {pluginRightHeader}
           </>
         ),
       },
