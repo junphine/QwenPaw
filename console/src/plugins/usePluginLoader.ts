@@ -123,15 +123,28 @@ async function executePluginScript(plugin: FrontendPluginInfo): Promise<void> {
   if (!canExecute(plugin))
     throw new Error(`Plugin became unavailable before execution: ${plugin.id}`);
   // modify@byron
-  //const blobUrl = URL.createObjectURL(
-  //  new Blob([source], { type: "application/javascript" }),
-  //);
-  const blobUrl = "data:text/javascript;charset=utf-8," + encodeURIComponent(source);
-  try {
-    await import(/* @vite-ignore */ blobUrl);
-  } finally {
-    URL.revokeObjectURL(blobUrl);
+  if(import.meta.env.DEV){
+    const dataUrl = "data:text/javascript;charset=utf-8," + encodeURIComponent(source);
+    try {
+      await import(/* @vite-ignore */ dataUrl);
+    }
+    catch (e) {
+      console.error("[plugin] import failed:", plugin.id, e);
+      throw e;
+    }
   }
+  else{
+    const blobUrl = URL.createObjectURL(
+      new Blob([source], { type: "application/javascript" }),
+    );
+    try {
+      await import(/* @vite-ignore */ blobUrl);
+    }
+    finally {
+      URL.revokeObjectURL(blobUrl);
+    }
+  }
+
 }
 
 /** Load every installed frontend plugin during Console startup. */

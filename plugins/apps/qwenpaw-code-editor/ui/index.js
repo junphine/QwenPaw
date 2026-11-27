@@ -22,9 +22,8 @@
 
   var PLUGIN_ID = "qwenpaw-code-editor";
   var PLUGIN_NAME = "代码编辑器";
-  var VERSION = "0.1.9";
+  var VERSION = "0.1.12";
   var API_BASE = "/api/qwenpaw-code-editor";
-  var MONACO_CDN = "https://cdn.jsdelivr.net/npm/monaco-editor@0.56.0/min/vs";
 
   // localStorage 键
   var LS_LAST_DIR = "qwenpaw-code-editor:lastDir";   // 最后访问目录（快捷跳转记忆）
@@ -33,21 +32,115 @@
   var LS_SCROLL = "qwenpaw-code-editor:scroll";      // 编辑器滚动位置（刷新恢复）
   var LS_QUICK = "qwenpaw-code-editor:quick";        // 快捷访问折叠状态（刷新恢复）
   var LS_QUICK_CUSTOM = "qwenpaw-code-editor:quickCustom"; // 用户自定义快捷访问 [{path,label}]（刷新恢复）
+  var LS_SIDEBAR = "qwenpaw-code-editor:sidebarWidth"; // 左侧栏宽度（px，刷新恢复）
+  var SIDEBAR_DEFAULT = 280;
+
+  // 左侧栏宽度钳制：最小 180，最大 640，且给右侧编辑区至少留 320px
+  function clampSidebarWidth(w, viewportW) {
+    var vw = viewportW || (typeof window !== "undefined" && window.innerWidth) || 1200;
+    var maxW = Math.max(240, Math.min(640, vw - 320));
+    var n = (w === null || w === undefined || w === "") ? NaN : Number(w);
+    if (!isFinite(n)) n = SIDEBAR_DEFAULT;
+    return Math.max(180, Math.min(maxW, Math.round(n)));
+  }
+
+  // ---------- 认证 ----------
+  // 宿主不会替插件请求注入凭证：AuthMiddleware 只豁免 security.allow_no_auth_hosts
+  // （默认 127.0.0.1 / ::1），用局域网 IP、域名或反代访问时插件必须自带 Bearer，
+  // 否则所有 /api/* 返回 {"detail":"Not authenticated"}（401）。
+  // 写法对齐官方插件（agent-kanban 的 apiFetch / qwenpaw-creator 的 creatorHeaders）：
+  // host.getApiToken() → Authorization；PawApp iframe 下宿主挂在 window.parent。
+  // 注意：2.3.0.post1 的 window.QwenPaw.host 并没有 fetch 方法（文档有、bundle 未导出），
+  // 不能依赖 host.fetch，只能自行注入请求头。
+  function tokenFromHost(host) {
+    try {
+      return (host && typeof host.getApiToken === "function" && host.getApiToken()) || "";
+    } catch (e) { return ""; }
+  }
+
+  function hostToken() {
+    var t = "";
+    // 跨域 iframe 读 window.parent 会抛 SecurityError，单独兜住，避免连当前宿主也不查
+    try {
+      t = tokenFromHost(window.parent && window.parent.QwenPaw && window.parent.QwenPaw.host);
+    } catch (e) { t = ""; }
+    if (t) return t;
+    return tokenFromHost(window.QwenPaw && window.QwenPaw.host);
+  }
+
+  // 合并鉴权头与调用方自定义头（自定义头优先）
+  function authHeaders(extra) {
+    var headers = {};
+    var token = hostToken();
+    if (token) headers["Authorization"] = "Bearer " + token;
+    if (extra) {
+      for (var k in extra) {
+        if (Object.prototype.hasOwnProperty.call(extra, k)) headers[k] = extra[k];
+      }
+    }
+    return headers;
+  }
+
+  // 带鉴权的原始请求（下载等非 JSON 场景）
+  function fetchWithAuth(url, opts) {
+    var o = opts || {};
+    return fetch(url, {
+      method: o.method || "GET",
+      headers: authHeaders(o.headers),
+      body: o.body,
+    });
+  }
+
+  // 统一错误对象：401 给出可操作提示（登录失效），其余透传后端 detail
+  function httpError(status, body) {
+    var detail = (body && (body.detail || body.error || body.message)) || ("HTTP " + status);
+    var e = new Error(status === 401 ? "登录状态已失效（401），请刷新页面重新登录" : detail);
+    e.status = status;
+    e.detail = detail;
+    return e;
+  }
+
+  // 带进度的下载：流式读取 response.body，边收边回调 onProgress(loaded, total)。
+  // Content-Length 缺失（chunked/反代压缩）时 total=0，由 UI 显示不定进度。
+  function fetchBlobWithProgress(url, onProgress, signal) {
+    return fetchWithAuth(url, signal ? { signal: signal } : {}).then(function (r) {
+      if (!r.ok) {
+        return r.json().catch(function () { return {}; }).then(function (body) {
+          throw httpError(r.status, body);
+        });
+      }
+      var total = parseInt(r.headers.get("Content-Length") || "", 10);
+      if (!(total > 0)) total = 0;
+      onProgress(0, total);
+      var ctype = r.headers.get("Content-Type") || "application/octet-stream";
+      if (!r.body || typeof r.body.getReader !== "function") return r.blob();
+      var reader = r.body.getReader();
+      var chunks = [];
+      var loaded = 0;
+      function pump() {
+        return reader.read().then(function (res) {
+          if (res.done) return new Blob(chunks, { type: ctype });
+          chunks.push(res.value);
+          loaded += res.value.length;
+          onProgress(loaded, total);
+          return pump();
+        });
+      }
+      return pump();
+    });
+  }
 
   // fetch 封装
   function fetchJson(url, opts) {
     var o = opts || {};
-    return fetch(url, {
+    var headers = o.body ? { "Content-Type": "application/json" } : undefined;
+    return fetchWithAuth(url, {
       method: o.method || "GET",
-      headers: o.body ? { "Content-Type": "application/json" } : undefined,
+      headers: headers,
       body: o.body ? JSON.stringify(o.body) : undefined,
     }).then(function (r) {
       return r.json().then(function (j) {
-        if (!r.ok) {
-          var e = new Error((j && j.detail) || ("HTTP " + r.status));
-          e.status = r.status;
-          throw e;
-        }
+        if (!r.ok) throw httpError(r.status, j);
         return j;
       });
     });
@@ -140,51 +233,11 @@
   // ---------- Monaco 加载（CDN AMD） ----------
   var monacoPromise = null;
   function loadMonaco() {
+    if(!window.monaco)
+      window.monaco = window.QwenPaw.host.monaco;
     if (window.monaco && window.monaco.editor) return Promise.resolve(window.monaco);
     if (monacoPromise) return monacoPromise;
-    monacoPromise = new Promise(function (resolve, reject) {
-      var s = document.createElement("script");
-      s.src = MONACO_CDN + "/loader.js";
-      s.onload = function () {
-        try {
-          window.require.config({ paths: { vs: MONACO_CDN } });
-          // 中文语言包：Monaco 内置右键菜单（剪切/复制/粘贴/全选/更改所有匹配项/命令面板等）
-          // 由内部 ContextMenuController 创建，手动改 action label 无法覆盖，只能走官方 nls 机制。
-          // ⚠ 官方 AMD 版语言包 vs/nls/lang/zh-cn.js 只设置 _VSCODE_NLS_MESSAGES 全局变量、不调用
-          // define()（microsoft/monaco-editor#5402：这会让 nls.messages-loader 的 AMD require
-          // 永久挂起 → 编辑器加载卡死）。修复：先把语言包当普通 script 预加载，再手动 define 注册
-          // 该模块，使 nls 插件链正常完成；语言包加载失败时退回英文（localizeMonacoMenu 兜底），
-          // 任何情况下都不阻塞编辑器加载。
-          var ls = document.createElement("script");
-          ls.src = MONACO_CDN + "/nls/lang/zh-cn.js";
-          ls.onload = function () {
-            try {
-              if (window.define) {
-                window.define("vs/nls/lang/zh-cn", [], function () {
-                  return globalThis._VSCODE_NLS_MESSAGES || [];
-                });
-              }
-              window.require.config({ "vs/nls": { availableLanguages: { "*": "zh-cn" } } });
-            } catch (e) { /* 注册失败则退回英文，不阻塞编辑器 */ }
-            bootEditor();
-          };
-          ls.onerror = function () { bootEditor(); };
-          document.head.appendChild(ls);
-          function bootEditor() {
-            window.require(["vs/editor/editor.main"], function () {
-              if (window.monaco && window.monaco.editor) {
-                registerRobotFrameworkLanguage(window.monaco);
-                resolve(window.monaco);
-              } else {
-                reject(new Error("monaco.editor 未就绪"));
-              }
-            });
-          }
-        } catch (e) { reject(e); }
-      };
-      s.onerror = function () { reject(new Error("Monaco CDN 加载失败（请检查网络）")); };
-      document.head.appendChild(s);
-    });
+    monacoPromise = window.QwenPaw.host.getMonaco();
     return monacoPromise;
   }
 
@@ -338,6 +391,15 @@
     var [monacoReady, setMonacoReady] = React.useState(false);
     var [monacoErr, setMonacoErr] = React.useState("");
     var [busy, setBusy] = React.useState("");
+    // 下载传输进度 {label, loaded, total, startedAt}；null = 无传输
+    var [transfer, setTransfer] = React.useState(null);
+    // 左侧栏宽度（可拖拽 / 键盘调整，刷新恢复）
+    var [sidebarW, setSidebarW] = React.useState(function () {
+      try { return clampSidebarWidth(localStorage.getItem(LS_SIDEBAR), window.innerWidth); }
+      catch (e) { return SIDEBAR_DEFAULT; }
+    });
+    var [resizing, setResizing] = React.useState(false);
+    var [isFullscreen, setIsFullscreen] = React.useState(false);
     var [notice, setNotice] = React.useState(null); // {type, text}
     var [selectedDir, setSelectedDir] = React.useState("");
     var [quickCollapsed, setQuickCollapsed] = React.useState(function () {
@@ -359,12 +421,115 @@
     var treeRootRef = React.useRef(null); // 当前文件树根（快捷访问跳转后切换）
     var pendingOpen = null; // editor 就绪前缓存的待打开文件（刷新恢复）
     var externalTargetRef = React.useRef(null); // 外部跳转（文件浏览器「编辑」）目标路径
+    var downloadAbort = React.useRef(null);     // 进行中的下载 AbortController
+    var openFileRef = React.useRef(null);       // 当前打开文件（供全局快捷键闭包读取）
+    openFileRef.current = openFile;
 
     // 通知（3.5s 自动消失）
     function showNotice(type, text) {
       setNotice({ type: type, text: text });
       if (self._noticeTimer) clearTimeout(self._noticeTimer);
       self._noticeTimer = setTimeout(function () { setNotice(null); }, 3500);
+    }
+
+    // 左侧栏宽度：拖拽结束后写入 localStorage（拖拽过程中不写，避免每个像素都落盘）
+    React.useEffect(function () {
+      if (resizing) return;
+      try { localStorage.setItem(LS_SIDEBAR, String(sidebarW)); } catch (e) { /* ignore */ }
+    }, [sidebarW, resizing]);
+
+    function startResize(e) {
+      if (e.button !== undefined && e.button !== 0) return;
+      e.preventDefault();
+      var startX = e.clientX;
+      var startW = sidebarW;
+      setResizing(true);
+      function onMove(ev) {
+        setSidebarW(clampSidebarWidth(startW + (ev.clientX - startX), window.innerWidth));
+      }
+      function onUp() {
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+        setResizing(false);
+      }
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+    }
+
+    function resizeByKey(e) {
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      e.preventDefault();
+      setSidebarW(clampSidebarWidth(sidebarW + (e.key === "ArrowLeft" ? -16 : 16), window.innerWidth));
+    }
+
+    // 查找 / 替换：直接调 Monaco 原生 Find Widget（与 VS Code 同一套 UI、同一套快捷键），
+    // 作用域天然只有当前 editor 的 model，也就是"只查找当前打开的文件"。
+    function runFind(replace) {
+      var ed = editorRef.current;
+      if (!ed || !openFileRef.current) {
+        showNotice("info", "请先打开一个文件再查找");
+        return;
+      }
+      ed.focus();
+      ed.trigger("toolbar", replace ? "editor.action.startFindReplaceAction" : "actions.find", null);
+      // Find 输入框把 placeholder 当 tooltip，Monaco 0.56 在带偏移/滚动的容器里会把
+      // 这个悬停层定位到负坐标（跑到窗口外）。清掉 tooltip，保留可见的 placeholder。
+      setTimeout(silenceFindTooltips, 0);
+    }
+
+    function silenceFindTooltips() {
+      try {
+        var ed = editorRef.current;
+        if (!ed || !ed.getContribution) return;
+        var ctrl = ed.getContribution("editor.contrib.findController");
+        var widget = ctrl && ctrl._widget;
+        if (!widget) return;
+        ["_findInput", "_replaceInput"].forEach(function (k) {
+          var box = widget[k] && widget[k].inputBox;
+          if (box && box.tooltip) box.tooltip = "";
+        });
+      } catch (e) { /* 内部字段改名时静默降级，不影响查找功能 */ }
+    }
+
+    // 浏览器全屏：优先整个 document；PawApp iframe 未授权 fullscreen 时给出提示
+    React.useEffect(function () {
+      function onFsChange() {
+        setIsFullscreen(!!(document.fullscreenElement || document.webkitFullscreenElement));
+      }
+      document.addEventListener("fullscreenchange", onFsChange);
+      document.addEventListener("webkitfullscreenchange", onFsChange);
+      return function () {
+        document.removeEventListener("fullscreenchange", onFsChange);
+        document.removeEventListener("webkitfullscreenchange", onFsChange);
+      };
+    }, []);
+
+    function toggleFullscreen() {
+      try {
+        var doc = document;
+        if (doc.fullscreenElement || doc.webkitFullscreenElement) {
+          var exit = doc.exitFullscreen || doc.webkitExitFullscreen;
+          if (exit) {
+            var p0 = exit.call(doc);
+            if (p0 && p0.catch) p0.catch(function () { /* ignore */ });
+          }
+          return;
+        }
+        var el = doc.documentElement;
+        var req = el.requestFullscreen || el.webkitRequestFullscreen;
+        if (!req) {
+          showNotice("error", "当前浏览器不支持全屏 API，可用 F11");
+          return;
+        }
+        var p = req.call(el);
+        if (p && p.catch) {
+          p.catch(function (e) {
+            showNotice("error", "全屏被浏览器/容器拒绝：" + ((e && e.message) || e) + "（可用 F11 或宿主窗口最大化）");
+          });
+        }
+      } catch (e) {
+        showNotice("error", "全屏失败：" + ((e && e.message) || e));
+      }
     }
 
     // 右键菜单关闭：点击其他区域 / 滚轮 / Esc / 右键其它位置。
@@ -524,8 +689,26 @@
     // 加载 Monaco（页面挂载即开始，后台预加载）
     React.useEffect(function () {
       loadMonaco()
-        .then(function () { setMonacoReady(true); })
+        .then(function (m) { window.monaco = m; setMonacoReady(true); })
         .catch(function (e) { setMonacoErr(e.message); });
+    }, []);
+
+    // 全局 Ctrl/Cmd+F 查找、Ctrl/Cmd+H 替换：焦点不在编辑器内时也能唤起
+    // （焦点在编辑器内时 Monaco 自己处理，不重复触发）
+    React.useEffect(function () {
+      function onFindKey(e) {
+        if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+        var k = String(e.key || "").toLowerCase();
+        if (k !== "f" && k !== "h") return;
+        var host = editorElRef.current;
+        if (host && host.contains(e.target)) return;
+        if (!editorRef.current || !openFileRef.current) return;
+        e.preventDefault();
+        runFind(k === "h");
+      }
+      document.addEventListener("keydown", onFindKey);
+      return function () { document.removeEventListener("keydown", onFindKey); };
+      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     // 编辑器容器挂载后创建 editor
@@ -553,6 +736,8 @@
         scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10 },
       });
       editorRef.current = editor;
+      // Find 输入框的 tooltip 在容器带偏移时会被定位到窗口外，创建后立刻清掉
+      setTimeout(silenceFindTooltips, 0);
       // 右键菜单汉化：优先走官方 nls 语言包（loadMonaco 已预加载 zh-cn 语言包并修复 #5402 挂起，
       // 覆盖 Cut/Copy/Paste 等 ContextMenuController 内部固定项）；仅当语言包未生效（CDN 异常、
       // 预加载失败）时才用 localizeMonacoMenu 改 action label 兜底，避免覆盖官方翻译。
@@ -736,15 +921,54 @@
     }
 
     // 下载文件（走后端 /download attachment 接口）
+    // <a href> 无法携带 Authorization：非 loopback 访问会 401。改为 fetch +
+    // 流式读取（带进度 / 可取消）后再触发本地下载，token 只走请求头。
+    function transferText(t) {
+      if (!t) return "";
+      var pct = t.total > 0 ? Math.min(100, Math.floor((t.loaded / t.total) * 100)) : -1;
+      var secs = Math.max(0.2, (Date.now() - t.startedAt) / 1000);
+      return (pct >= 0 ? pct + "% " : "") + fmtSize(t.loaded) +
+        (t.total > 0 ? " / " + fmtSize(t.total) : "") +
+        " · " + fmtSize(Math.round(t.loaded / secs)) + "/s";
+    }
+
+    function cancelDownload() {
+      if (downloadAbort.current) downloadAbort.current.abort();
+    }
+
     function downloadFile(item) {
-      try {
-        var a = document.createElement("a");
-        a.href = API_BASE + "/download?path=" + encodeURIComponent(item.path);
-        a.download = basename(item.path);
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-      } catch (e) { showNotice("error", "下载失败: " + e.message); }
+      if (downloadAbort.current) { showNotice("info", "已有下载任务进行中"); return; }
+      var controller = (typeof AbortController !== "undefined") ? new AbortController() : null;
+      downloadAbort.current = controller;
+      var label = basename(item.path);
+      var startedAt = Date.now();
+      setTransfer({ label: label, loaded: 0, total: 0, startedAt: startedAt });
+      fetchBlobWithProgress(
+        API_BASE + "/download?path=" + encodeURIComponent(item.path),
+        function (loaded, total) {
+          setTransfer({ label: label, loaded: loaded, total: total, startedAt: startedAt });
+        },
+        controller ? controller.signal : undefined
+      )
+        .then(function (blob) {
+          var url = URL.createObjectURL(blob);
+          var a = document.createElement("a");
+          a.href = url;
+          a.download = label;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
+          showNotice("ok", "已下载: " + label);
+        })
+        .catch(function (e) {
+          if (e && e.name === "AbortError") showNotice("info", "已取消下载");
+          else showNotice("error", "下载失败: " + ((e && e.message) || e));
+        })
+        .finally(function () {
+          downloadAbort.current = null;
+          setTransfer(null);
+        });
     }
 
     // 重命名 / 删除后刷新父目录（保持原展开状态）
@@ -876,7 +1100,13 @@
         },
           arrow,
           h("span", { style: { marginRight: 4 } }, iconFor(item)),
-          h("span", { style: { overflow: "hidden", textOverflow: "ellipsis" } }, item.name)
+          h("span", { style: { overflow: "hidden", textOverflow: "ellipsis", color: item.broken ? C.muted : undefined } }, item.name),
+          item.link
+            ? h("span", {
+                style: { flex: "0 0 auto", fontSize: 10.5, color: item.broken ? C.red : C.muted },
+                title: item.broken ? "符号链接已失效" : "符号链接",
+              }, item.broken ? "🔗失效" : "🔗")
+            : null,
         ),
         isDir && node.expanded
           ? h("div", null,
@@ -1036,7 +1266,10 @@
       };
       return h("div", {
         style: {
-          display: "flex", alignItems: "center", gap: 8, padding: "8px 12px",
+          display: "flex", alignItems: "center", gap: 8,
+          // 右侧预留 76px：宿主窗口/PawApp 的关闭按钮浮在右上角；窄屏换行时
+          // 按钮也不会落到按钮下面（与 file-browser 顶栏同样留 76px）
+          padding: "8px 76px 8px 12px",
           borderBottom: "1px solid " + C.border, background: C.panel, flexWrap: "wrap",
         }
       },
@@ -1054,28 +1287,69 @@
           onClick: saveFile,
           title: "Ctrl+S",
         }, saving ? "保存中…" : (dirty ? "💾 保存 ●" : "💾 保存")),
-        status && h("span", {
-          style: { marginLeft: "auto", color: C.muted, fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "45%" },
-          title: status.working_dir,
-        }, "工作区: " + status.working_dir + (status.mode === "platform" ? "（平台模式）" : "")),
+        // 右上角：全屏 / 查找 / 替换
+        h("div", { style: { marginLeft: "auto", display: "flex", gap: 8, flex: "0 0 auto" } },
+          h("button", {
+            style: Object.assign({}, btnBase, isFullscreen ? { borderColor: C.accent, color: C.accent } : {}),
+            onClick: toggleFullscreen,
+            title: isFullscreen ? "退出全屏" : "浏览器全屏显示（Esc 退出）",
+          }, isFullscreen ? "⛶ 退出全屏" : "⛶ 全屏"),
+          h("button", {
+            style: btnBase,
+            onClick: function () { runFind(false); },
+            title: "查找（Ctrl+F），仅当前打开的文件",
+          }, "🔍 查找"),
+          h("button", {
+            style: btnBase,
+            onClick: function () { runFind(true); },
+            title: "替换（Ctrl+H），仅当前打开的文件",
+          }, "⇄ 替换")
+        ),
+        // 工作区路径、动态提示统一放到底部状态栏；顶栏只保留操作按钮
       );
     }
 
-    // 状态栏
+    // 状态栏（底部）：保存状态 / 动态提示（复制路径、下载、重命名等）/ 当前文件 / 工作区 / 语言 / Monaco
     function renderStatusBar() {
       var lang = openFile ? langForPath(openFile.path) : "";
+      var noticeColor = notice ? (notice.type === "error" ? C.red : notice.type === "ok" ? C.green : C.yellow) : C.muted;
+      var noticeIcon = notice ? (notice.type === "error" ? "❌ " : notice.type === "ok" ? "✅ " : "ℹ️ ") : "";
       return h("div", {
         style: {
-          display: "flex", alignItems: "center", gap: 12,
+          display: "flex", alignItems: "center", gap: 10, overflow: "hidden",
           padding: "3px 12px", borderTop: "1px solid " + C.border,
           background: C.panel, color: C.muted, fontSize: 11.5, minHeight: 24,
         }
       },
-        h("span", { style: { color: dirty ? C.yellow : C.green } },
+        h("span", { style: { flex: "0 0 auto", color: dirty ? C.yellow : C.green } },
           dirty ? "● 未保存" : "已保存"),
-        openFile && h("span", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, openFile.path),
-        lang ? h("span", { style: { marginLeft: "auto" } }, lang) : null,
-        monacoErr ? h("span", { style: { color: C.red } }, "Monaco 加载失败") : (monacoReady ? h("span", null, "Monaco " + (window.monaco ? window.monaco.editor ? "✓" : "" : "")) : h("span", null, "加载 Monaco…")),
+        // 动态提示（已复制路径 / 已下载 / 重命名失败…）紧挨保存状态显示
+        notice ? h("span", {
+          style: {
+            flex: "0 1 auto", minWidth: 0, maxWidth: "42%", color: noticeColor,
+            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+          },
+          title: notice.text,
+        }, noticeIcon + notice.text) : null,
+        h("span", {
+          style: {
+            flex: "1 1 auto", minWidth: 0, overflow: "hidden",
+            textOverflow: "ellipsis", whiteSpace: "nowrap",
+          },
+          title: openFile ? openFile.path : "",
+        }, openFile ? openFile.path : ""),
+        status ? h("span", {
+          style: {
+            flex: "0 1 auto", minWidth: 0, maxWidth: "34%", marginLeft: "auto",
+            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+          },
+          title: status.working_dir,
+        }, "工作区: " + status.working_dir + (status.mode === "platform" ? "（平台模式）" : "")) : null,
+        lang ? h("span", { style: { flex: "0 0 auto" } }, lang) : null,
+        h("span", { style: { flex: "0 0 auto" } },
+          monacoErr
+            ? h("span", { style: { color: C.red } }, "Monaco 加载失败")
+            : (monacoReady ? "Monaco " + (window.monaco && window.monaco.editor ? "✓" : "") : "加载 Monaco…")),
       );
     }
 
@@ -1086,7 +1360,7 @@
           style: { flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: C.red, fontSize: 14, flexDirection: "column", gap: 8 },
         },
           h("div", null, "❌ " + monacoErr),
-          h("div", { style: { color: C.muted, fontSize: 12 } }, "编辑器需要从 CDN 加载 Monaco（" + MONACO_CDN + "），请确认浏览器可访问外网后刷新"),
+          h("div", { style: { color: C.muted, fontSize: 12 } }, "编辑器需要从 定制版Qwenpaw 加载 Monaco!"),
         );
       }
       if (!monacoReady) {
@@ -1102,19 +1376,11 @@
 
     return h("div", { style: { display: "flex", flexDirection: "column", height: "100%", background: C.bg, color: C.text, fontFamily: "-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" } },
       renderToolbar(),
-      notice && h("div", {
-        style: {
-          padding: "6px 12px", fontSize: 12.5,
-          background: notice.type === "error" ? "rgba(248,81,73,.12)" : notice.type === "ok" ? "rgba(63,185,80,.12)" : "rgba(210,153,34,.12)",
-          color: notice.type === "error" ? C.red : notice.type === "ok" ? C.green : C.yellow,
-          borderBottom: "1px solid " + C.border,
-        }
-      }, (notice.type === "error" ? "❌ " : notice.type === "ok" ? "✅ " : "ℹ️ ") + notice.text),
       h("div", { style: { display: "flex", flex: 1, minHeight: 0 } },
-        // 左侧文件树
+        // 左侧文件树（宽度可拖拽调整，刷新恢复）
         h("div", {
           style: {
-            width: 280, minWidth: 200, borderRight: "1px solid " + C.border,
+            width: sidebarW, flex: "0 0 auto", minWidth: 0,
             background: C.treeBg, display: "flex", flexDirection: "column", minHeight: 0,
           }
         },
@@ -1123,16 +1389,52 @@
             style: { padding: "8px 12px", borderBottom: "1px solid " + C.border, color: C.muted, fontSize: 11.5, display: "flex", justifyContent: "space-between" },
           },
             h("span", null, "文件"),
-            busy ? h("span", { style: { color: C.yellow } }, busy) : null,
+            transfer
+              ? h("span", { style: { color: C.yellow, display: "flex", alignItems: "center", gap: 5, minWidth: 0 } },
+                  h("span", {
+                    style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+                    title: "下载 " + transfer.label + "：" + transferText(transfer),
+                  }, transferText(transfer)),
+                  h("span", {
+                    style: { cursor: "pointer", color: C.muted, flex: "0 0 auto" },
+                    onClick: cancelDownload,
+                    title: "取消下载",
+                  }, "✕")
+                )
+              : (busy ? h("span", { style: { color: C.yellow } }, busy) : null),
           ),
           renderTree(),
         ),
+        // 拖拽手柄：调整左侧栏宽度（双击恢复默认，左右方向键微调）
+        h("div", {
+          className: "ce-resize",
+          role: "separator",
+          "aria-orientation": "vertical",
+          "aria-label": "调整文件树宽度",
+          "aria-valuemin": 180,
+          "aria-valuemax": 640,
+          "aria-valuenow": sidebarW,
+          tabIndex: 0,
+          title: "拖拽调整宽度，双击恢复默认（" + SIDEBAR_DEFAULT + "px），←/→ 微调",
+          onMouseDown: startResize,
+          onDoubleClick: function () { setSidebarW(SIDEBAR_DEFAULT); },
+          onKeyDown: resizeByKey,
+          style: {
+            flex: "0 0 auto", width: 6, marginLeft: -3, marginRight: -3,
+            cursor: "col-resize", background: resizing ? C.accent : "transparent",
+            zIndex: 5,
+          },
+        }),
         // 右侧编辑器
         h("div", { style: { flex: 1, display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 } },
           renderEditorArea(),
           renderStatusBar(),
         ),
       ),
+      // 拖拽期间盖一层透明遮罩，避免 Monaco / 文件树吞掉 mousemove 或误选中
+      resizing ? h("div", {
+        style: { position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 99990, cursor: "col-resize" },
+      }) : null,
       renderCtxMenu(),
     );
   }
@@ -1150,7 +1452,10 @@
         ".ce-tree-scroll::-webkit-scrollbar-track{background:transparent}" +
         ".ce-tree-scroll::-webkit-scrollbar-thumb{background:rgba(110,118,129,.4);border-radius:5px;border:2px solid transparent;background-clip:content-box}" +
         ".ce-tree-scroll::-webkit-scrollbar-thumb:hover{background:rgba(110,118,129,.65);border:2px solid transparent;background-clip:content-box}" +
-        ".ce-tree-scroll::-webkit-scrollbar-corner{background:transparent}";
+        ".ce-tree-scroll::-webkit-scrollbar-corner{background:transparent}" +
+        ".ce-resize{border-left:1px solid #30363d}" +
+        ".ce-resize:hover,.ce-resize:focus-visible{background:rgba(88,166,255,.45);outline:none}" +
+        ".ce-resize:active{background:rgba(88,166,255,.7)}";
       document.head.appendChild(s);
     } catch (e) { console.error(e); }
   })();

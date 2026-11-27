@@ -1,14 +1,14 @@
 {
   "id": "qwenpaw-code-editor",
   "name": "代码编辑器",
-  "version": "0.1.9",
-  "description": "QwenPaw 代码编辑器 v0.1.9：基于 Monaco Editor（VSCode 同款编辑器核心）的在线代码编辑应用，支持浏览工作区目录、打开/编辑/新建文本与代码文件、Ctrl+S 保存；按扩展名自动切换语法高亮（python/javascript/typescript/html/css/json/markdown/shell/robot 等 20+ 语言，含 Robot Framework .robot/.resource 高亮），深色主题；文件树右键菜单：打开 / 复制路径 / 下载 / 重命名 / 删除，目录可添加到快捷访问（📌 自定义快捷访问支持 ✕ 移除，刷新保留）；右键菜单通过官方 nls 语言包完整汉化（含剪切/复制/粘贴/更改所有匹配项/命令面板等，修复语言包 AMD 挂起导致加载卡死问题）；支持从文件浏览器「编辑」一键跳转打开文件，并自动展开文件树定位到目标文件；默认仅可访问当前工作区（平台模式可访问系统所有可读路径，遵循权限），二进制/超大文件安全拦截",
+  "version": "0.1.12",
+  "description": "QwenPaw 代码编辑器 v0.1.12：基于 Monaco Editor（VSCode 同款编辑器核心）的在线代码编辑应用，支持浏览工作区目录、打开/编辑/新建文本与代码文件、Ctrl+S 保存；按扩展名自动切换语法高亮（python/javascript/typescript/html/css/json/markdown/shell/robot 等 20+ 语言，含 Robot Framework .robot/.resource 高亮），深色主题；文件树右键菜单：打开 / 复制路径 / 下载 / 重命名 / 删除，目录可添加到快捷访问（📌 自定义快捷访问支持 ✕ 移除，刷新保留）；右键菜单通过官方 nls 语言包完整汉化（含剪切/复制/粘贴/更改所有匹配项/命令面板等，修复语言包 AMD 挂起导致加载卡死问题）；支持从文件浏览器「编辑」一键跳转打开文件，并自动展开文件树定位到目标文件；默认仅可访问当前工作区（平台模式可访问系统所有可读路径，遵循权限），二进制/超大文件安全拦截；非 localhost 访问自动注入宿主 Bearer token，修复局域网/域名访问插件接口 401；符号链接只改/删链接本身、受保护路径禁删禁改名、保存改原子写入、下载带进度可取消；文件树宽度可拖拽/键盘调整并记忆（180–640px），顶栏只保留操作按钮、动态提示与工作区信息移到底部状态栏，仍保留宿主关闭按钮安全区；顶栏右上角新增查找/替换（Ctrl+F / Ctrl+H，Monaco 原生 Find Widget，仅当前文件）与浏览器全屏按钮；修复查找框悬停提示定位到窗口外的问题",
   "author": "QwenPaw QA Agent",
   "license": "Apache-2.0",
   "type": "app",
   "qwenpaw_version": {
     "min": "2.0.0",
-    "max": "2.1.0"
+    "max": "2.99.0"
   },
   "entry": {
     "backend": "plugin.py",

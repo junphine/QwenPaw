@@ -807,6 +807,7 @@ export default function SessionProjectDirectory({
    *  trigger keeps describing what the server has. Agent scope keeps its
    *  typed draft across a dismiss, as it always has. */
   const handleOpenChange = (next: boolean) => {
+    if (chatId) return;
     setOpen(next);
     if (next) return;
     if (isListScope) {
